@@ -1,0 +1,88 @@
+{
+  "technical_skills": {
+    "programming_languages": [
+      "Python", "Java", "JavaScript", "C", "C++", "C#", "Go", "Rust", "PHP", "Kotlin", "Swift", "TypeScript", "R", "Dart", "Scala", "Ruby"
+    ],
+    "web_technologies": [
+      "HTML", "HTML5", "CSS", "CSS3", "React", "React.js", "Next.js", "Node.js", "Express", "Express.js", "Angular", "Vue", "Vue.js", "Django", "Flask", "Bootstrap", "Tailwind", "TailwindCSS", "REST API", "GraphQL", "WebSockets"
+    ],
+    "databases": [
+      "MySQL", "PostgreSQL", "MongoDB", "Oracle", "Redis", "SQL", "SQLite", "Firebase", "Cassandra", "MariaDB", "DynamoDB"
+    ],
+    "data_science_ml": [
+      "Pandas", "NumPy", "Matplotlib", "Seaborn", "Scikit-learn", "TensorFlow", "PyTorch", "Machine Learning", "Deep Learning", "NLP", "OpenCV", "Keras", "Data Science", "Computer Vision"
+    ],
+    "data_analytics": [
+      "Excel", "Power BI", "PowerBI", "Tableau", "Statistics", "Data Visualization", "Data Mining", "ETL", "Data Cleaning", "Data Analysis"
+    ],
+    "cloud_devops": [
+      "AWS", "Azure", "Google Cloud", "GCP", "Docker", "Kubernetes", "Linux", "CI/CD", "Nginx", "Jenkins", "Terraform", "Ansible"
+    ],
+    "healthcare_nursing": [
+      "Patient Care", "Medication Administration", "IV Therapy", "Vital Signs", "Wound Dressing", "Clinical Nursing", "Pharma", "Anatomy", "Pharmacology", "Hospital Administration", "EHR", "EMR", "BLS", "ACLs", "Patient Triage"
+    ],
+    "accounting_finance": [
+      "Tally", "Tally Prime", "GST", "Bookkeeping", "Auditing", "Accounts Payable", "Accounts Receivable", "Taxation", "Financial Analysis", "Payroll", "Balance Sheet", "Cost Accounting", "QuickBooks", "SAP FI", "Financial Reporting", "TDS", "Tally ERP"
+    ],
+    "mechanical_engineering": [
+      "AutoCAD", "SolidWorks", "CATIA", "ANSYS", "Machining", "CNC", "CAD", "CAM", "HVAC", "Thermodynamics", "Hydraulics", "Manufacturing", "GD&T", "Finite Element Analysis", "Piping Design", "Mechanical Design"
+    ],
+    "civil_engineering": [
+      "Revit", "STAAD Pro", "Quantity Surveying", "Site Inspection", "Building Design", "AutoCAD Civil", "Construction Management", "Surveying", "Structural Analysis", "Estimation", "Concrete Technology"
+    ],
+    "electrical_engineering": [
+      "MATLAB", "Simulink", "PLC", "SCADA", "Power Electronics", "Circuit Design", "Cadence", "PCB Design", "Microcontrollers", "Embedded Systems", "High Voltage", "Electrical Design", "Single Line Diagrams"
+    ],
+    "education_teaching": [
+      "Lesson Planning", "Classroom Management", "Curriculum Development", "Pedagogy", "Academic Counseling", "Educational Assessment", "Student Evaluation", "E-learning", "Subject Teaching"
+    ],
+    "marketing": [
+      "Digital Marketing", "SEO", "SEM", "Google Ads", "Social Media Marketing", "Content Marketing", "Copywriting", "Brand Management", "Google Analytics", "Email Marketing", "Lead Generation", "Market Research"
+    ],
+    "sales": [
+      "B2B Sales", "Cold Calling", "Client Acquisition", "Inside Sales", "Field Sales", "Key Account Management", "CRM", "Sales Forecasting", "Negotiation", "Sales Strategy", "Lead Qualification"
+    ],
+    "design_creative": [
+      "Photoshop", "Illustrator", "InDesign", "Figma", "UI Design", "UX Design", "Graphic Design", "Typography", "Wireframing", "Video Editing", "Premiere Pro", "After Effects", "Sketch"
+    ],
+    "hr_recruitment": [
+      "Talent Acquisition", "Recruitment", "Employee Relations", "Onboarding", "HRIS", "Performance Management", "Payroll", "Labor Laws", "HR Policies", "Sourcing"
+    ],
+    "legal_compliance": [
+      "Legal Research", "Contract Drafting", "Compliance", "Corporate Law", "Litigation", "Intellectual Property", "Arbitration", "Legal Analysis"
+    ],
+    "operations_logistics": [
+      "Supply Chain", "Inventory Management", "Logistics", "Procurement", "Vendor Management", "Six Sigma", "Lean Manufacturing", "Process Optimization"
+    ],
+    "tools": [
+      "Git", "GitHub", "Jira", "Postman", "VS Code", "Visual Studio Code", "Linux", "Bash", "Jupyter", "PyCharm", "Eclipse", "Maven"
+    ]
+  },
+  "soft_skills": [
+    "Communication", "Leadership", "Teamwork", "Problem Solving", "Time Management", "Critical Thinking", "Adaptability", "Creativity", "Collaboration", "Presentation", "Work Ethic", "Emotional Intelligence", "Attention to Detail", "Analytical Thinking", "Negotiation", "Patient Empathy", "Classroom Engagement"
+  ],
+  "aliases": {
+    "react.js": "React",
+    "reactjs": "React",
+    "node.js": "Node.js",
+    "nodejs": "Node.js",
+    "express.js": "Express",
+    "expressjs": "Express",
+    "vue.js": "Vue",
+    "vuejs": "Vue",
+    "powerbi": "Power BI",
+    "gcp": "Google Cloud",
+    "tailwind": "TailwindCSS",
+    "html5": "HTML",
+    "css3": "CSS",
+    "py": "Python",
+    "js": "JavaScript",
+    "ts": "TypeScript",
+    "c++": "C++",
+    "c#": "C#",
+    "tally prime": "Tally",
+    "tally erp": "Tally",
+    "autocad civil": "AutoCAD",
+    "staad.pro": "STAAD Pro"
+  }
+}

@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: careerlens-backend
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - PORT=5000
+      - MONGO_URI=${MONGO_URI:-mongodb://localhost:27017/career_intelligence}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-careerlens_jwt_secret_production_2026}
+      - SECRET_KEY=${SECRET_KEY:-careerlens_secret_key_production_2026}
+      - ADZUNA_APP_ID=${ADZUNA_APP_ID}
+      - ADZUNA_APP_KEY=${ADZUNA_APP_KEY}
+      - ADZUNA_COUNTRY=${ADZUNA_COUNTRY:-in}
+      - FRONTEND_URL=http://localhost:80
+      - CORS_ORIGINS=http://localhost:80,http://localhost:5173
+    volumes:
+      - backend_uploads:/app/uploads/resumes
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_BASE_URL=http://localhost:5000/api
+    container_name: careerlens-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  backend_uploads:
