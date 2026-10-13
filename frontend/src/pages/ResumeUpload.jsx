@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { resumeAPI } from '../services/api';
+import { useJobContext } from '../context/JobContext';
 
 const ResumeUpload = () => {
   const navigate = useNavigate();
+  const { invalidateJobCache } = useJobContext();
   const [selectedFile, setSelectedFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -72,6 +74,7 @@ const ResumeUpload = () => {
       if (response.success) {
         setUploadSuccess(response.data.resume);
         setSelectedFile(null);
+        invalidateJobCache();
       } else {
         setError(response.message || 'Failed to upload resume.');
       }

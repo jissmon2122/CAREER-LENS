@@ -1,5 +1,7 @@
 import logging
 import requests
+import copy
+import time
 from datetime import datetime, timezone
 from app.services.job_providers.base_provider import BaseJobProvider
 from app.config import Config
@@ -10,6 +12,7 @@ class AdzunaJobProvider(BaseJobProvider):
     """
     Adzuna Live Job Search API Provider Adapter.
     Communicates securely with Adzuna API without exposing credentials to frontend.
+    Includes persistent HTTP session keep-alive and 30-minute query result caching.
     """
 
     def __init__(self):
@@ -18,8 +21,10 @@ class AdzunaJobProvider(BaseJobProvider):
         self.country = (Config.ADZUNA_COUNTRY or 'in').lower()
         self.base_url = Config.ADZUNA_BASE_URL or "https://api.adzuna.com/v1/api/jobs"
         self.results_per_page = Config.ADZUNA_RESULTS_PER_PAGE or 50
-        self.timeout = Config.ADZUNA_TIMEOUT or 10
+        self.timeout = Config.ADZUNA_TIMEOUT or 8
         self.provider_name = "Adzuna Jobs"
+        self.session = requests.Session()
+        self._cache = {}
 
     def is_configured(self) -> bool:
         return bool(self.app_id and self.app_key)
@@ -41,6 +46,14 @@ class AdzunaJobProvider(BaseJobProvider):
                 "total": 0
             }
 
+        cache_key = (keyword.strip().lower(), location.strip().lower(), country.strip().lower(), page, min(limit, 50))
+        now_ts = time.time()
+        if cache_key in self._cache:
+            entry = self._cache[cache_key]
+            if now_ts - entry["timestamp"] < 1800:
+                logger.info(f"Returning cached Adzuna live jobs for '{keyword}' ({len(entry['data'].get('jobs', []))} items)")
+                return copy.deepcopy(entry["data"])
+
         url = f"{self.base_url.rstrip('/')}/{country}/search/{page}"
         params = {
             'app_id': self.app_id,
@@ -52,7 +65,7 @@ class AdzunaJobProvider(BaseJobProvider):
         }
 
         try:
-            response = requests.get(url, params=params, timeout=self.timeout)
+            response = self.session.get(url, params=params, timeout=self.timeout)
             if response.status_code == 200:
                 data = response.json()
                 results = data.get('results', [])
@@ -64,7 +77,7 @@ class AdzunaJobProvider(BaseJobProvider):
                     if norm.get("application_url"):
                         normalized_jobs.append(norm)
 
-                return {
+                res_payload = {
                     "success": True,
                     "source": self.provider_name,
                     "total": total,
@@ -72,6 +85,10 @@ class AdzunaJobProvider(BaseJobProvider):
                     "limit": limit,
                     "jobs": normalized_jobs
                 }
+                if len(self._cache) > 200:
+                    self._cache.clear()
+                self._cache[cache_key] = {"timestamp": now_ts, "data": res_payload}
+                return res_payload
             elif response.status_code == 429:
                 logger.warning("Adzuna API rate limited (429).")
                 return {"success": False, "error": "RATE_LIMITED", "message": "Live job search API rate limit reached. Showing cached vacancies."}

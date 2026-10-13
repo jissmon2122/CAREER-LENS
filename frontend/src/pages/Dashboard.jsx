@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useJobContext } from '../context/JobContext';
 import { resumeAPI, userAPI, aiAPI } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import RecommendedJobs from '../components/RecommendedJobs';
 
 const Dashboard = () => {
   const { user, setUser } = useAuth();
+  const { refreshLiveJobs } = useJobContext();
   const [resumes, setResumes] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [aiStatus, setAiStatus] = useState(null);
@@ -78,6 +80,7 @@ const Dashboard = () => {
       const response = await resumeAPI.analyzeResume(latestResume.id);
       if (response.data && response.data.analysis) {
         setAnalysis(response.data.analysis);
+        refreshLiveJobs(true);
       } else {
         setError(response.message || "Failed to analyze resume.");
       }

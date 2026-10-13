@@ -1,58 +1,112 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { forecastingAPI } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 
+// In-memory client-side cache for future skill demand forecasting (30 min TTL)
+const FORECAST_CACHE_TTL = 30 * 60 * 1000;
+let forecastMemoryCache = {
+  topSkills: null,
+  recommendations: [],
+  skillForecasts: {}, // memoized map of skillName -> forecast
+  timestamp: 0,
+  horizon: '6M',
+  lastSearchedSkill: 'Python'
+};
+
 const SkillDemandPage = () => {
-  const [horizon, setHorizon] = useState('6M');
-  const [topSkills, setTopSkills] = useState(null);
-  const [recommendations, setRecommendations] = useState([]);
-  const [searchSkill, setSearchSkill] = useState('Python');
-  const [skillForecast, setSkillForecast] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const isCacheValid = Boolean(
+    forecastMemoryCache.topSkills &&
+    (Date.now() - forecastMemoryCache.timestamp < FORECAST_CACHE_TTL)
+  );
+
+  const [horizon, setHorizon] = useState(forecastMemoryCache.horizon || '6M');
+  const [topSkills, setTopSkills] = useState(isCacheValid ? forecastMemoryCache.topSkills : null);
+  const [recommendations, setRecommendations] = useState(isCacheValid ? forecastMemoryCache.recommendations : []);
+  const [searchSkill, setSearchSkill] = useState(forecastMemoryCache.lastSearchedSkill || 'Python');
+  const [skillForecast, setSkillForecast] = useState(
+    isCacheValid && forecastMemoryCache.skillForecasts[forecastMemoryCache.lastSearchedSkill || 'Python']
+      ? forecastMemoryCache.skillForecasts[forecastMemoryCache.lastSearchedSkill || 'Python']
+      : null
+  );
+  const [loading, setLoading] = useState(!isCacheValid);
+  const [refreshing, setRefreshing] = useState(false);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const fetchTopData = async () => {
+  const fetchForecastData = useCallback(async (isManualRefresh = false) => {
+    if (isManualRefresh) {
+      setRefreshing(true);
+    } else if (!isCacheValid) {
       setLoading(true);
-      setError('');
-      try {
-        const [topRes, recRes] = await Promise.all([
-          forecastingAPI.getTopSkills(),
-          forecastingAPI.getRecommendations().catch(() => null)
-        ]);
+    }
+    setError('');
 
-        if (topRes.success) {
-          setTopSkills(topRes.data);
-        }
-        if (recRes && recRes.success) {
-          setRecommendations(recRes.data.recommendations || []);
-        }
+    try {
+      const activeSkill = searchSkill.trim() || 'Python';
+      const [topRes, recRes, pyRes] = await Promise.all([
+        forecastingAPI.getTopSkills(),
+        forecastingAPI.getRecommendations().catch(() => null),
+        forecastingAPI.getSkillForecast(activeSkill).catch(() => null)
+      ]);
 
-        // Fetch initial skill forecast for Python
-        const pyRes = await forecastingAPI.getSkillForecast('Python');
-        if (pyRes.success && pyRes.data.forecast) {
-          setSkillForecast(pyRes.data.forecast);
-        }
-      } catch (err) {
-        console.error("Forecasting Error:", err);
-        setError("Failed to load skill demand forecasts.");
-      } finally {
-        setLoading(false);
+      if (topRes?.success) {
+        setTopSkills(topRes.data);
+        forecastMemoryCache.topSkills = topRes.data;
       }
-    };
+      if (recRes?.success) {
+        const recList = recRes.data.recommendations || [];
+        setRecommendations(recList);
+        forecastMemoryCache.recommendations = recList;
+      }
+      if (pyRes?.success && pyRes.data?.forecast) {
+        setSkillForecast(pyRes.data.forecast);
+        forecastMemoryCache.skillForecasts[activeSkill.toLowerCase()] = pyRes.data.forecast;
+        forecastMemoryCache.lastSearchedSkill = activeSkill;
+      }
 
-    fetchTopData();
-  }, []);
+      forecastMemoryCache.timestamp = Date.now();
+    } catch (err) {
+      console.error("Forecasting Error:", err);
+      if (!isCacheValid) {
+        setError("Failed to load skill demand forecasts.");
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [isCacheValid, searchSkill]);
+
+  useEffect(() => {
+    if (!isCacheValid) {
+      fetchForecastData(false);
+    }
+  }, [isCacheValid, fetchForecastData]);
+
+  const handleHorizonChange = (h) => {
+    setHorizon(h);
+    forecastMemoryCache.horizon = h;
+  };
 
   const handleSearchSkill = async (e) => {
     e.preventDefault();
-    if (!searchSkill.trim()) return;
+    const query = searchSkill.trim();
+    if (!query) return;
+
+    const cacheKey = query.toLowerCase();
+    // Instant cache hit for searched skill
+    if (forecastMemoryCache.skillForecasts[cacheKey]) {
+      setSkillForecast(forecastMemoryCache.skillForecasts[cacheKey]);
+      forecastMemoryCache.lastSearchedSkill = query;
+      return;
+    }
+
     setSearching(true);
     try {
-      const res = await forecastingAPI.getSkillForecast(searchSkill.trim());
-      if (res.success && res.data.forecast) {
+      const res = await forecastingAPI.getSkillForecast(query);
+      if (res?.success && res.data?.forecast) {
         setSkillForecast(res.data.forecast);
+        forecastMemoryCache.skillForecasts[cacheKey] = res.data.forecast;
+        forecastMemoryCache.lastSearchedSkill = query;
       }
     } catch (err) {
       console.error("Skill Search Error:", err);
@@ -82,18 +136,40 @@ const SkillDemandPage = () => {
           </p>
         </div>
 
-        {/* Horizon Buttons */}
-        <div style={{ background: 'var(--bg-input)', padding: '0.35rem', borderRadius: 'var(--radius-md)', display: 'flex', gap: '0.35rem' }}>
-          {['3M', '6M', '12M'].map((h) => (
-            <button
-              key={h}
-              onClick={() => setHorizon(h)}
-              className={horizon === h ? 'btn btn-primary' : 'btn btn-secondary'}
-              style={{ fontSize: '0.85rem', padding: '0.4rem 0.85rem' }}
-            >
-              {h} Forecast
-            </button>
-          ))}
+        {/* Controls: Refresh & Horizon Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          {refreshing && (
+            <span className="badge badge-purple" style={{ fontSize: '0.75rem', animation: 'pulse 1.5s infinite' }}>
+              Updating in background...
+            </span>
+          )}
+
+          <button
+            onClick={() => fetchForecastData(true)}
+            disabled={loading || refreshing}
+            className="btn btn-secondary"
+            title="Refresh Skill Demand Forecasts"
+            style={{ fontSize: '0.85rem', padding: '0.45rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            <span style={{ display: 'inline-block', transform: refreshing ? 'rotate(360deg)' : 'none', transition: 'transform 0.8s ease' }}>
+              🔄
+            </span>
+            {refreshing ? 'Refreshing...' : 'Refresh Forecasts'}
+          </button>
+
+          {/* Horizon Buttons */}
+          <div style={{ background: 'var(--bg-input)', padding: '0.35rem', borderRadius: 'var(--radius-md)', display: 'flex', gap: '0.35rem' }}>
+            {['3M', '6M', '12M'].map((h) => (
+              <button
+                key={h}
+                onClick={() => handleHorizonChange(h)}
+                className={horizon === h ? 'btn btn-primary' : 'btn btn-secondary'}
+                style={{ fontSize: '0.85rem', padding: '0.4rem 0.85rem' }}
+              >
+                {h} Forecast
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

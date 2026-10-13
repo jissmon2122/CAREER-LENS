@@ -14,7 +14,21 @@ from app.services.deduplication import DeduplicationAndCacheEngine
 from app.services.eligibility_service import EligibilityService
 from app.services.geo_eligibility_service import GeoEligibilityService
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+
 logger = logging.getLogger(__name__)
+
+# High-performance in-memory recommendations cache
+_RECOMMENDATIONS_CACHE = {}
+_RECOMMENDATIONS_CACHE_TTL = 1800  # 30 minutes
+
+def clear_recommendations_cache(target_user_id=None):
+    global _RECOMMENDATIONS_CACHE
+    if target_user_id:
+        _RECOMMENDATIONS_CACHE = {k: v for k, v in _RECOMMENDATIONS_CACHE.items() if k[0] != str(target_user_id)}
+    else:
+        _RECOMMENDATIONS_CACHE.clear()
 
 job_bp = Blueprint('job', __name__)
 
@@ -94,6 +108,16 @@ def get_recommended_jobs():
     is_remote = True if remote_param in ['true', '1', 'yes'] else (False if remote_param in ['false', '0', 'no'] else None)
     experience_param = request.args.get('experience', '').strip()
     min_match_param = request.args.get('min_match', '')
+    force_refresh = request.args.get('refresh', '').lower() in ['true', '1', 'yes']
+
+    # Fast in-memory cache check: if user already has computed recommendations with these params, return immediately (0ms)
+    cache_key = (user_id, latest_resume_id, role_param, location_param, is_remote, experience_param, min_match_param)
+    now_ts = time.time()
+    if not force_refresh and cache_key in _RECOMMENDATIONS_CACHE:
+        cache_entry = _RECOMMENDATIONS_CACHE[cache_key]
+        if now_ts - cache_entry['timestamp'] < _RECOMMENDATIONS_CACHE_TTL:
+            logger.info(f"Serving live recommendations from memory cache for user {user_id}")
+            return jsonify(cache_entry['data']), 200
 
     # Location Resolution Priority: 1. UI Selected -> 2. User Profile -> 3. Resume -> 4. Default "India"
     user_pref_loc = (user_json.get('preferred_location') or user_json.get('location') or '').strip()
@@ -126,52 +150,60 @@ def get_recommended_jobs():
 
         if not search_keywords:
             search_keywords = [candidate_profile.get("professional_identity", "Professional")]
-        search_keywords = search_keywords[:6]
+        # Prioritize top 2 most targeted queries to keep latency low (Adzuna provides up to 50 jobs per query)
+        search_keywords = search_keywords[:2]
 
     # Target search locations: under GEO_POLICY = WORLDWIDE, query broad/location-agnostic or candidate preferred location
     loc_targets = [location_param] if location_param else [""]
 
-    # 4. Multi-Source Live Provider Execution (Adzuna + Jooble + IndianAPI)
+    # 4. Multi-Source Live Provider Execution (Adzuna + Jooble + IndianAPI) - Parallelized via ThreadPoolExecutor
     provider = ProviderFactory.get_provider()
     raw_live_jobs = []
     seen_job_keys = set()
     provider_status = {}
     providers_used = set()
 
-    for kw in search_keywords:
-        for loc_target in loc_targets:
+    def _fetch_provider(kw, loc_target):
+        search_params = {
+            'keyword': kw,
+            'location': loc_target,
+            'country': target_country,
+            'remote': is_remote,
+            'experience': experience_param,
+            'limit': 50
+        }
+        try:
+            return provider.search_jobs(search_params)
+        except Exception as e:
+            logger.error(f"Error querying live provider for keyword '{kw}' at '{loc_target}': {e}")
+            return {"success": False, "jobs": [], "error": str(e)}
 
-            search_params = {
-                'keyword': kw,
-                'location': loc_target,
-                'country': target_country,
-                'remote': is_remote,
-                'experience': experience_param,
-                'limit': 50
-            }
-            try:
-                provider_res = provider.search_jobs(search_params)
-                p_status = provider_res.get('provider_status', {})
-                if p_status:
-                    provider_status.update(p_status)
-                p_used = provider_res.get('providers_used', [])
-                if p_used:
-                    providers_used.update(p_used)
+    query_tasks = [(kw, loc) for kw in search_keywords for loc in loc_targets]
+    max_workers = min(4, len(query_tasks)) if query_tasks else 1
 
-                if provider_res.get('success'):
-                    for item in provider_res.get('jobs', []):
-                        j_id = str(item.get('provider_job_id', ''))
-                        prov = str(item.get('provider', ''))
-                        title = str(item.get('title', '')).lower()
-                        company = str(item.get('company', '')).lower()
-                        app_url = str(item.get('application_url', '')).strip()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_provider, kw, loc): (kw, loc) for kw, loc in query_tasks}
+        for future in as_completed(futures):
+            provider_res = future.result()
+            p_status = provider_res.get('provider_status', {})
+            if p_status:
+                provider_status.update(p_status)
+            p_used = provider_res.get('providers_used', [])
+            if p_used:
+                providers_used.update(p_used)
 
-                        dedup_key = (prov, j_id) if j_id else (app_url if app_url else (company, title))
-                        if dedup_key not in seen_job_keys:
-                            seen_job_keys.add(dedup_key)
-                            raw_live_jobs.append(item)
-            except Exception as e:
-                logger.error(f"Error querying live provider for keyword '{kw}' at '{loc_target}': {e}")
+            if provider_res.get('success'):
+                for item in provider_res.get('jobs', []):
+                    j_id = str(item.get('provider_job_id', ''))
+                    prov = str(item.get('provider', ''))
+                    title = str(item.get('title', '')).lower()
+                    company = str(item.get('company', '')).lower()
+                    app_url = str(item.get('application_url', '')).strip()
+
+                    dedup_key = (prov, j_id) if j_id else (app_url if app_url else (company, title))
+                    if dedup_key not in seen_job_keys:
+                        seen_job_keys.add(dedup_key)
+                        raw_live_jobs.append(item)
 
     raw_jobs_count = len(raw_live_jobs)
 
@@ -441,7 +473,7 @@ def get_recommended_jobs():
             }
         }), 200
 
-    return jsonify({
+    resp_payload = {
         "success": True,
         "status": "LIVE_RECOMMENDATIONS_AVAILABLE",
         "geo_policy": "WORLDWIDE",
@@ -463,7 +495,17 @@ def get_recommended_jobs():
             "grouped_recommendations": grouped_recommendations,
             "all_recommendations": matched_job_cards
         }
-    }), 200
+    }
+
+    # Cache successful recommendations in memory
+    if len(_RECOMMENDATIONS_CACHE) > 100:
+        _RECOMMENDATIONS_CACHE.clear()
+    _RECOMMENDATIONS_CACHE[cache_key] = {
+        "timestamp": time.time(),
+        "data": resp_payload
+    }
+
+    return jsonify(resp_payload), 200
 
 @job_bp.route('/<job_id>/match', methods=['GET'])
 @jwt_required

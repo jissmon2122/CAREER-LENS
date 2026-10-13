@@ -107,12 +107,35 @@ class ExtractionService:
 
         return sections_detected
 
+    _compiled_skill_patterns = None
+    _compiled_soft_patterns = None
+
     @classmethod
-    def extract_skills(cls, text):
-        """Extract technical skills (categorized) and soft skills using word boundaries & alias mappings."""
+    def _ensure_compiled_patterns(cls):
+        """Precompile regex patterns once to maximize regex matching speed across job datasets."""
+        if cls._compiled_skill_patterns is not None:
+            return
         skills_dict = cls.get_skills_dictionary()
         tech_categories = skills_dict.get("technical_skills", {})
         soft_skills_list = skills_dict.get("soft_skills", [])
+
+        cls._compiled_skill_patterns = {}
+        for category, skill_list in tech_categories.items():
+            cls._compiled_skill_patterns[category] = [
+                (skill, re.compile(r'(?<![a-zA-Z0-9])' + re.escape(skill) + r'(?![a-zA-Z0-9])', re.IGNORECASE))
+                for skill in skill_list
+            ]
+
+        cls._compiled_soft_patterns = [
+            (soft, re.compile(r'\b' + re.escape(soft) + r'\b', re.IGNORECASE))
+            for soft in soft_skills_list
+        ]
+
+    @classmethod
+    def extract_skills(cls, text):
+        """Extract technical skills (categorized) and soft skills using word boundaries & alias mappings."""
+        cls._ensure_compiled_patterns()
+        skills_dict = cls.get_skills_dictionary()
         aliases = skills_dict.get("aliases", {})
 
         extracted_tech_by_category = {}
@@ -126,25 +149,21 @@ class ExtractionService:
                 "soft_skills": []
             }
 
-        # 1. Technical Skills Extraction
-        for category, skill_list in tech_categories.items():
+        # 1. Technical Skills Extraction using precompiled fast regexes
+        for category, compiled_pairs in cls._compiled_skill_patterns.items():
             found_in_category = set()
-            for skill in skill_list:
-                # Word boundary regex with special char escaping for C++, C#, etc.
-                pattern = r'(?<![a-zA-Z0-9])' + re.escape(skill) + r'(?![a-zA-Z0-9])'
-                if re.search(pattern, text, re.IGNORECASE):
-                    # Check alias mapping
+            for skill, regex in compiled_pairs:
+                if regex.search(text):
                     normalized_name = aliases.get(skill.lower(), skill)
                     found_in_category.add(normalized_name)
                     all_extracted_tech.add(normalized_name)
-            
+
             if found_in_category:
                 extracted_tech_by_category[category] = sorted(list(found_in_category))
 
-        # 2. Soft Skills Extraction
-        for soft_skill in soft_skills_list:
-            pattern = r'\b' + re.escape(soft_skill) + r'\b'
-            if re.search(pattern, text, re.IGNORECASE):
+        # 2. Soft Skills Extraction using precompiled fast regexes
+        for soft_skill, regex in cls._compiled_soft_patterns:
+            if regex.search(text):
                 extracted_soft.add(soft_skill)
 
         return {

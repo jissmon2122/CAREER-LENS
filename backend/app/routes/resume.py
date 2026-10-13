@@ -134,7 +134,13 @@ def execute_resume_analysis_pipeline(resume: dict, user_id: str) -> dict:
         "analysis_status": "completed"
     }
 
-    return ResumeAnalysisModel.create_or_update_analysis(analysis_payload)
+    res = ResumeAnalysisModel.create_or_update_analysis(analysis_payload)
+    try:
+        from app.routes.job import clear_recommendations_cache
+        clear_recommendations_cache(user_id)
+    except Exception as e:
+        logger.warning(f"Failed to clear recommendations cache: {e}")
+    return res
 
 @resume_bp.route('/upload', methods=['POST'])
 @jwt_required

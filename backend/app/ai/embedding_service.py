@@ -70,6 +70,48 @@ class EmbeddingService:
             logger.error(f"Error generating embedding for text: {e}")
             return None
 
+    def get_embeddings_batch(self, texts: list) -> list:
+        """
+        Generate normalized 384-dimensional vector embeddings for a list of texts in a single batch pass.
+        Much faster on CPU by leveraging PyTorch SIMD vectorized operations.
+        """
+        if not self.is_available() or not texts:
+            return [None] * len(texts)
+        if not self._ensure_model_loaded():
+            return [None] * len(texts)
+
+        results = [None] * len(texts)
+        uncached_indices = []
+        uncached_texts = []
+
+        for idx, text in enumerate(texts):
+            clean = text.strip() if text else ""
+            if not clean:
+                continue
+            if clean in self._cache:
+                results[idx] = self._cache[clean]
+            else:
+                uncached_indices.append(idx)
+                uncached_texts.append(clean)
+
+        if uncached_texts:
+            try:
+                batch_embs = self.model.encode(
+                    uncached_texts,
+                    batch_size=32,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                    show_progress_bar=False
+                )
+                for idx, emb in zip(uncached_indices, batch_embs):
+                    results[idx] = emb
+                    if len(self._cache) < 10000:
+                        self._cache[texts[idx].strip()] = emb
+            except Exception as e:
+                logger.error(f"Error generating batch embeddings: {e}")
+
+        return results
+
     def cosine_similarity(self, vec1, vec2) -> float:
         """
         Compute cosine similarity between two vector representations.

@@ -11,13 +11,50 @@ from app.models.resume_analysis import ResumeAnalysisModel
 from app.models.user import UserModel
 from app.models.skill_forecast import SkillForecastModel
 
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
 forecasting_bp = Blueprint('forecasting', __name__, url_prefix='/api/forecasting')
 
-def _generate_all_forecasts():
-    """Helper to generate time-series forecasts across all dataset skills."""
+# In-memory forecast caches
+_ALL_FORECASTS_CACHE = {"timestamp": 0, "data": None}
+_FORECASTS_TTL_SECONDS = 3600  # 1 hour
+_USER_FORECAST_REC_CACHE = {}
+
+def _generate_all_forecasts(force_refresh=False):
+    """Helper to generate and return time-series forecasts across all dataset skills with high-performance caching."""
+    global _ALL_FORECASTS_CACHE
+    now_ts = time.time()
+
+    # 1. Check in-memory cache
+    if not force_refresh and _ALL_FORECASTS_CACHE["data"] and (now_ts - _ALL_FORECASTS_CACHE["timestamp"] < _FORECASTS_TTL_SECONDS):
+        return _ALL_FORECASTS_CACHE["data"]
+
+    # 2. Check MongoDB collection for existing fresh forecasts
+    if not force_refresh:
+        try:
+            existing_docs = SkillForecastModel.get_all_forecasts()
+            if existing_docs and len(existing_docs) >= 10:
+                forecasts = {}
+                for d in existing_docs:
+                    sk = str(d.get("skill", "")).lower().strip()
+                    if sk:
+                        forecasts[sk] = d
+                if len(forecasts) >= 10:
+                    _ALL_FORECASTS_CACHE = {"timestamp": now_ts, "data": forecasts}
+                    logger.info(f"Loaded {len(forecasts)} forecasts from MongoDB cache in 0ms.")
+                    return forecasts
+        except Exception as e:
+            logger.warning(f"Could not load forecasts from database cache: {e}")
+
+    # 3. Compute forecasts across dataset skills
+    logger.info("Computing time-series forecasting models across dataset skills...")
     all_jobs = JobService.get_all_jobs()
     time_series_map = SkillFrequencyEngine.compute_monthly_frequencies(all_jobs)
     forecasts = {}
+    docs_to_save = []
 
     for sk, ts in time_series_map.items():
         rates = ts["demand_rates"]
@@ -62,9 +99,16 @@ def _generate_all_forecasts():
             "forecast_rates": preds
         }
 
-        SkillForecastModel.save_forecast(forecast_doc)
+        docs_to_save.append(forecast_doc)
         forecasts[sk] = forecast_doc
 
+    # Batch save into database
+    try:
+        SkillForecastModel.save_forecasts_batch(docs_to_save)
+    except Exception as e:
+        logger.warning(f"Batch forecast save warning: {e}")
+
+    _ALL_FORECASTS_CACHE = {"timestamp": now_ts, "data": forecasts}
     return forecasts
 
 @forecasting_bp.route('/top-skills', methods=['GET'])
@@ -143,6 +187,15 @@ def get_personalized_forecast_recommendations():
         return jsonify({"success": False, "message": "Please upload a resume first."}), 400
 
     latest_resume_id = str(my_resumes[0].get("_id"))
+
+    force_refresh = request.args.get('refresh', '').lower() in ['true', '1', 'yes']
+    rec_cache_key = (user_id, latest_resume_id)
+    now_ts = time.time()
+    if not force_refresh and rec_cache_key in _USER_FORECAST_REC_CACHE:
+        entry = _USER_FORECAST_REC_CACHE[rec_cache_key]
+        if now_ts - entry["timestamp"] < 1800:
+            return jsonify(entry["data"]), 200
+
     analysis_doc = ResumeAnalysisModel.find_by_resume_id(latest_resume_id)
     if not analysis_doc:
         return jsonify({"success": False, "message": "Please analyze your resume first."}), 400
@@ -168,15 +221,22 @@ def get_personalized_forecast_recommendations():
     user_json = UserModel.to_json(user)
 
     gap_res = SkillGapEngine.analyze_skill_gap(analysis_json, user_json, target_job)
-    forecasts = _generate_all_forecasts()
+    forecasts = _generate_all_forecasts(force_refresh=force_refresh)
 
     recommendations = ForecastingRecommendationEngine.generate_recommendations(gap_res, forecasts, candidate_profile, candidate_skills)
 
-    return jsonify({
+    response_payload = {
         "success": True,
         "data": {
             "target_role": candidate_profile.get("professional_identity", target_job.get("title", "Professional")),
             "domain": candidate_profile.get("professional_domain", "GENERAL_PROFESSIONAL"),
             "recommendations": recommendations
         }
-    }), 200
+    }
+
+    _USER_FORECAST_REC_CACHE[rec_cache_key] = {
+        "timestamp": now_ts,
+        "data": response_payload
+    }
+
+    return jsonify(response_payload), 200

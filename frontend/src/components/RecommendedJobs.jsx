@@ -1,38 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { jobAPI } from '../services/api';
+import { useJobContext } from '../context/JobContext';
 import JobMatchModal from './JobMatchModal';
 import LoadingSpinner from './LoadingSpinner';
 
 const RecommendedJobs = ({ resumeAnalyzed }) => {
-  const [recommendations, setRecommendations] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const {
+    buckets,
+    liveJobsData,
+    loading: contextLoading,
+    refreshing,
+    error: contextError,
+    fetchLiveJobs,
+    refreshLiveJobs
+  } = useJobContext();
+
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [loadingMatchId, setLoadingMatchId] = useState(null);
+
+  // Recommendations from shared context
+  const recommendations = buckets?.all_recommendations?.length
+    ? buckets.all_recommendations
+    : (liveJobsData?.data?.recommendations || []);
 
   useEffect(() => {
     if (!resumeAnalyzed) return;
 
-    const fetchRecommendations = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const response = await jobAPI.getRecommendedJobs();
-        if (response.success && response.data.recommendations) {
-          setRecommendations(response.data.recommendations);
-        }
-      } catch (err) {
-        console.error("Failed to load recommended jobs:", err);
-        const msg = err.response?.data?.message || err.message || "Failed to load job recommendations.";
-        setError(msg);
-      } finally {
-        setLoading(false);
-      }
-    };
+    // If already loaded in context, don't refetch
+    if (recommendations.length > 0) return;
 
-    fetchRecommendations();
-  }, [resumeAnalyzed]);
+    fetchLiveJobs();
+  }, [resumeAnalyzed, recommendations.length, fetchLiveJobs]);
 
   const handleViewMatch = async (jobId) => {
     setLoadingMatchId(jobId);
@@ -58,7 +57,7 @@ const RecommendedJobs = ({ resumeAnalyzed }) => {
 
   if (!resumeAnalyzed) return null;
 
-  if (loading) {
+  if (recommendations.length === 0 && contextLoading) {
     return (
       <div className="glass-card" style={{ gridColumn: 'span 12', padding: '2rem', textAlign: 'center' }}>
         <LoadingSpinner text="Computing 6-component weighted job match scores across live dataset..." />
@@ -66,10 +65,17 @@ const RecommendedJobs = ({ resumeAnalyzed }) => {
     );
   }
 
-  if (error) {
+  if (recommendations.length === 0 && contextError) {
     return (
       <div className="glass-card" style={{ gridColumn: 'span 12', padding: '2rem', textAlign: 'center' }}>
-        <p style={{ color: 'var(--accent-pink)' }}>{error}</p>
+        <p style={{ color: 'var(--accent-pink)' }}>{contextError}</p>
+        <button
+          onClick={() => refreshLiveJobs(true)}
+          className="btn btn-secondary"
+          style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -80,16 +86,47 @@ const RecommendedJobs = ({ resumeAnalyzed }) => {
 
   return (
     <div style={{ gridColumn: 'span 12', marginTop: '1.5rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Recommended Jobs For You</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Recommended Jobs For You</h2>
+            {refreshing && (
+              <span className="badge badge-purple" style={{ fontSize: '0.72rem', animation: 'pulse 1.5s infinite' }}>
+                Updating in background...
+              </span>
+            )}
+          </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '0.2rem' }}>
             Calculated dynamically from your extracted resume profile and target dataset jobs.
           </p>
         </div>
-        <span className="badge badge-primary" style={{ fontSize: '0.85rem' }}>
-          Top {recommendations.length} Matches
-        </span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <span className="badge badge-primary" style={{ fontSize: '0.85rem' }}>
+            Top {recommendations.length} Matches
+          </span>
+
+          <button
+            onClick={() => refreshLiveJobs(true)}
+            disabled={contextLoading || refreshing}
+            className="btn btn-secondary"
+            title="Refresh Recommendations"
+            style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            <span style={{ display: 'inline-block', transform: refreshing ? 'rotate(360deg)' : 'none', transition: 'transform 0.8s ease' }}>
+              🔄
+            </span>
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+
+          <Link
+            to="/dashboard/jobs"
+            className="btn btn-outline"
+            style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+          >
+            View Live Search →
+          </Link>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>

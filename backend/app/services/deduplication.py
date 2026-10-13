@@ -1,5 +1,7 @@
 import logging
 from datetime import datetime, timezone
+from bson import ObjectId
+from pymongo import UpdateOne, InsertOne
 from app.db import Database
 from app.config import Config
 from app.services.job_cleaner import JobDescriptionCleaner
@@ -35,6 +37,28 @@ class DeduplicationAndCacheEngine:
         processed_jobs = []
         batch_url_to_id = {}
         batch_comp_title_loc_to_id = {}
+        bulk_ops = []
+        pending_embeddings = []
+
+        # High-performance batch preloading to reduce Mongo Atlas roundtrips
+        provider_job_ids = [str(j.get("provider_job_id", "")) for j in provider_jobs if j.get("provider_job_id")]
+        app_urls = [str(j.get("application_url", "")).strip() for j in provider_jobs if j.get("application_url")]
+        preloaded_docs = {}
+        if provider_job_ids or app_urls:
+            or_clauses = []
+            if provider_job_ids:
+                or_clauses.append({"provider_job_id": {"$in": provider_job_ids}})
+            if app_urls:
+                or_clauses.append({"application_url": {"$in": app_urls}})
+            try:
+                for doc in jobs_collection.find({"$or": or_clauses}):
+                    p_key = (doc.get("provider"), str(doc.get("provider_job_id", "")))
+                    if p_key[1]:
+                        preloaded_docs[p_key] = doc
+                    if doc.get("application_url"):
+                        preloaded_docs[doc["application_url"]] = doc
+            except Exception as e:
+                logger.warning(f"Batch preload warning: {e}")
 
         for raw_job in provider_jobs:
             provider = raw_job.get("provider", "unknown")
@@ -57,32 +81,21 @@ class DeduplicationAndCacheEngine:
             norm_company = company.lower().strip()
             app_url = str(raw_job.get("application_url", "")).strip()
 
-            # Level 1 Duplicate Check: provider + provider_job_id
-            existing_doc = None
-            if provider_job_id:
-                existing_doc = jobs_collection.find_one({
-                    "provider": provider,
-                    "provider_job_id": provider_job_id
-                })
+            # Fast In-Memory Preloaded Duplicate Check
+            p_key = (provider, provider_job_id)
+            existing_doc = preloaded_docs.get(p_key) if provider_job_id else None
 
-            # Level 2 Duplicate Check: canonical application_url (DB or in-memory batch)
             if not existing_doc and app_url:
                 if app_url in batch_url_to_id:
-                    existing_doc = jobs_collection.find_one({"_id": batch_url_to_id[app_url]})
+                    existing_doc = preloaded_docs.get(batch_url_to_id[app_url])
                 else:
-                    existing_doc = jobs_collection.find_one({"application_url": app_url})
+                    existing_doc = preloaded_docs.get(app_url)
 
-            # Level 3 Duplicate Check: normalized_company + normalized_title + location (DB or in-memory batch)
+            # Level 3 Duplicate Check only if still not found
             if not existing_doc and norm_company and norm_title:
                 comp_key = (norm_company, norm_title, location)
                 if comp_key in batch_comp_title_loc_to_id:
-                    existing_doc = jobs_collection.find_one({"_id": batch_comp_title_loc_to_id[comp_key]})
-                else:
-                    existing_doc = jobs_collection.find_one({
-                        "normalized_company": norm_company,
-                        "normalized_title": norm_title,
-                        "location": location
-                    })
+                    existing_doc = preloaded_docs.get(batch_comp_title_loc_to_id[comp_key])
 
             # Determine workplace_type / remote_type cleanly
             raw_remote = str(raw_job.get("remote_type") or raw_job.get("workplace_type") or "").upper().strip()
@@ -106,13 +119,6 @@ class DeduplicationAndCacheEngine:
             if existing_doc:
                 # Update existing document (Level 1 or Level 2 matched)
                 doc_id = existing_doc["_id"]
-                
-                # Embedding Reuse Check
-                job_emb = existing_doc.get("job_embedding")
-                if not job_emb and clean_desc and embedding_service.is_available():
-                    job_emb = embedding_service.get_embedding(clean_desc)
-                    if job_emb is not None:
-                        job_emb = job_emb.tolist()
 
                 update_fields = {
                     "last_seen_at": now_iso,
@@ -129,28 +135,24 @@ class DeduplicationAndCacheEngine:
                     "workplace_type": resolved_workplace,
                     "data_type": "LIVE"
                 }
-                if job_emb:
-                    update_fields["job_embedding"] = job_emb
-                    update_fields["embedding_model"] = Config.AI_MODEL_NAME
-                    update_fields["embedding_version"] = 1
 
-                jobs_collection.update_one({"_id": doc_id}, {"$set": update_fields})
-                updated_job = jobs_collection.find_one({"_id": doc_id})
+                # Queue embedding if missing
+                if not existing_doc.get("job_embedding") and clean_desc:
+                    pending_embeddings.append((update_fields, clean_desc[:400]))
+
+                bulk_ops.append(UpdateOne({"_id": doc_id}, {"$set": update_fields}))
+                existing_doc.update(update_fields)
                 if app_url:
                     batch_url_to_id[app_url] = doc_id
                 if norm_company and norm_title:
                     batch_comp_title_loc_to_id[(norm_company, norm_title, location)] = doc_id
-                processed_jobs.append(cls._format_job_output(updated_job))
+                processed_jobs.append(cls._format_job_output(existing_doc))
 
             else:
-                # Insert New Normalized Job Document
-                job_emb = None
-                if clean_desc and embedding_service.is_available():
-                    emb_arr = embedding_service.get_embedding(clean_desc)
-                    if emb_arr is not None:
-                        job_emb = emb_arr.tolist()
-
+                # Insert New Normalized Job Document with pre-assigned ObjectId
+                new_id = ObjectId()
                 new_doc = {
+                    "_id": new_id,
                     "job_id": f"JOB_{provider}_{provider_job_id}" if provider_job_id else f"JOB_{now.strftime('%Y%m%d%H%M%S')}",
                     "provider": provider,
                     "provider_job_id": provider_job_id,
@@ -184,19 +186,36 @@ class DeduplicationAndCacheEngine:
                     "source_url": raw_job.get("source_url", ""),
                     "source_name": raw_job.get("source_name", "Live API Provider"),
                     "data_type": "LIVE",
-                    "job_embedding": job_emb,
-                    "embedding_model": Config.AI_MODEL_NAME if job_emb else None,
-                    "embedding_version": 1 if job_emb else None
+                    "job_embedding": None
                 }
 
-                res = jobs_collection.insert_one(new_doc)
-                new_doc["_id"] = res.inserted_id
-                inserted_id = res.inserted_id
+                if clean_desc:
+                    pending_embeddings.append((new_doc, clean_desc[:400]))
+
+                bulk_ops.append(InsertOne(new_doc))
                 if app_url:
-                    batch_url_to_id[app_url] = inserted_id
+                    batch_url_to_id[app_url] = new_id
                 if norm_company and norm_title:
-                    batch_comp_title_loc_to_id[(norm_company, norm_title, location)] = inserted_id
+                    batch_comp_title_loc_to_id[(norm_company, norm_title, location)] = new_id
                 processed_jobs.append(cls._format_job_output(new_doc))
+
+        # Vectorized batch embedding generation
+        if pending_embeddings and embedding_service.is_available():
+            texts_to_embed = [p[1] for p in pending_embeddings]
+            batch_embs = embedding_service.get_embeddings_batch(texts_to_embed)
+            for (target_dict, _), emb in zip(pending_embeddings, batch_embs):
+                if emb is not None:
+                    emb_list = emb.tolist() if hasattr(emb, "tolist") else emb
+                    target_dict["job_embedding"] = emb_list
+                    target_dict["embedding_model"] = Config.AI_MODEL_NAME
+                    target_dict["embedding_version"] = 1
+
+        # Execute single round-trip MongoDB bulk_write
+        if bulk_ops and jobs_collection is not None:
+            try:
+                jobs_collection.bulk_write(bulk_ops, ordered=False)
+            except Exception as e:
+                logger.error(f"Error during bulk_write to MongoDB: {e}")
 
         return processed_jobs
 

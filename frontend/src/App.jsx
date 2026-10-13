@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { JobProvider } from './context/JobContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -18,10 +19,11 @@ import LiveJobSearchPage from './pages/LiveJobSearchPage';
 function App() {
   return (
     <AuthProvider>
-      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <div className="app-container">
-          <Navbar />
-          <main className="main-content">
+      <JobProvider>
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <div className="app-container">
+            <Navbar />
+            <main className="main-content">
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/login" element={<Login />} />
@@ -87,6 +89,7 @@ function App() {
           <Footer />
         </div>
       </Router>
+      </JobProvider>
     </AuthProvider>
   );
 }
