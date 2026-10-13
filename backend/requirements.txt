@@ -14,3 +14,5 @@ spacy>=3.7.0
 scikit-learn>=1.4.0
 numpy>=1.26.0
 gunicorn>=21.2.0
+dnspython>=2.6.0
+certifi>=2024.2.2

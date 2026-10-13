@@ -9,11 +9,11 @@ def create_app():
     app.config.from_object(Config)
 
     # Enable CORS for API routes with configurable origins
-    cors_origins = app.config.get('CORS_ORIGINS', '*')
+    cors_origins = app.config.get('CORS_ORIGINS', ['*'])
     if cors_origins == ['*'] or cors_origins == '*':
-        CORS(app, resources={r"/api/*": {"origins": "*"}})
+        CORS(app, resources={r"/api/*": {"origins": "*"}}, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "X-Requested-With"])
     else:
-        CORS(app, resources={r"/api/*": {"origins": cors_origins}}, supports_credentials=True)
+        CORS(app, resources={r"/api/*": {"origins": cors_origins}}, supports_credentials=True, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "X-Requested-With"])
 
     # Initialize MongoDB connection
     Database.initialize(app)
@@ -42,13 +42,16 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(ai_bp)
 
-    # Base Health Check Route
+    # Base Health Check Routes (Root, /health, /api/health)
+    @app.route('/', methods=['GET'])
+    @app.route('/health', methods=['GET'])
     @app.route('/api/health', methods=['GET'])
     def health_check():
         from app.ai.embedding_service import embedding_service
         return jsonify({
             "success": True,
             "message": "Career Lens API is active",
+            "service": "CareerLens Backend API",
             "data": {
                 "status": "healthy",
                 "database_connected": Database.is_connected(),

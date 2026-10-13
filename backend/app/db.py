@@ -22,8 +22,19 @@ class Database:
         db_name = Config.DATABASE_NAME
         
         try:
-            # 5-second timeout to connect to MongoDB Atlas
-            cls._client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+            client_options = {
+                "serverSelectionTimeoutMS": 5000,
+                "connectTimeoutMS": 5000,
+                "socketTimeoutMS": 10000,
+            }
+            if "mongodb+srv://" in mongo_uri or "ssl=true" in mongo_uri.lower() or "tls=true" in mongo_uri.lower():
+                try:
+                    import certifi
+                    client_options["tlsCAFile"] = certifi.where()
+                except Exception:
+                    pass
+
+            cls._client = MongoClient(mongo_uri, **client_options)
             cls._client.admin.command('ping')
             cls._db = cls._client[db_name]
             logger.info(f"Successfully connected to MongoDB: {db_name}")
@@ -32,8 +43,9 @@ class Database:
             # Create automated database indexes
             cls._create_indexes()
         except Exception as err:
-            logger.warning(f"MongoDB connection warning: {err}. Running in in-memory mode.")
-            print(f"[WARNING] MongoDB connection offline ({mongo_uri}). Using in-memory database fallback.")
+            sanitized_host = mongo_uri.split('@')[-1].split('?')[0] if '@' in mongo_uri else mongo_uri.split('?')[0]
+            logger.warning(f"MongoDB connection warning ({sanitized_host}): {err}. Running in in-memory mode.")
+            print(f"[WARNING] MongoDB connection offline (host: {sanitized_host}). Using in-memory database fallback.")
             cls._client = None
             cls._db = False
 

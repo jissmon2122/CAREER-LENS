@@ -13,10 +13,15 @@ class Config:
     JWT_EXPIRATION_HOURS = int(os.getenv('JWT_EXPIRATION_HOURS', '24'))
     
     # Production CORS Configuration
-    FRONTEND_URL = os.getenv('FRONTEND_URL', '')
-    CORS_ORIGINS = [o.strip() for o in os.getenv('CORS_ORIGINS', '*').split(',') if o.strip()]
+    raw_frontend = (os.getenv('FRONTEND_URL') or '').strip().rstrip('/')
+    FRONTEND_URL = raw_frontend
+    raw_origins = (os.getenv('CORS_ORIGINS') or '').strip()
+    if raw_origins and raw_origins != '*':
+        CORS_ORIGINS = [o.strip().rstrip('/') for o in raw_origins.split(',') if o.strip()]
+    else:
+        CORS_ORIGINS = ['*']
     if FRONTEND_URL and FRONTEND_URL not in CORS_ORIGINS and '*' not in CORS_ORIGINS:
-        CORS_ORIGINS.append(FRONTEND_URL.strip())
+        CORS_ORIGINS.append(FRONTEND_URL)
     
     # Google OAuth Configuration
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', 'your_google_oauth_client_id.apps.googleusercontent.com')
