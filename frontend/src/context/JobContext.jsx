@@ -60,10 +60,19 @@ export const JobProvider = ({ children }) => {
   }, [currentUserId]);
 
   const updateFilters = useCallback((newFilters) => {
-    setFilters(prev => ({
-      ...prev,
-      ...(typeof newFilters === 'function' ? newFilters(prev) : newFilters)
-    }));
+    setFilters(prev => {
+      const next = typeof newFilters === 'function' ? newFilters(prev) : newFilters;
+      const merged = { ...prev, ...next };
+
+      // If target role changed, immediately purge stale recommendations from state
+      if (next.selectedRole !== undefined && next.selectedRole !== prev.selectedRole) {
+        setLiveJobsData(null);
+        setBuckets({ highly_relevant: [], relevant: [], potential: [], all_recommendations: [] });
+        lastParamsRef.current = '';
+        cacheTimestampRef.current = 0;
+      }
+      return merged;
+    });
   }, []);
 
   const invalidateJobCache = useCallback(() => {

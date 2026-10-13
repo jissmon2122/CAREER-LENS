@@ -85,20 +85,30 @@ class JobMatchingEngine:
             edu_pct = 75.0
         edu_points = round(edu_pct * 0.10, 2)
 
-        # 7. Role Match (15% Weight)
-        pref_role = (candidate_user.get("preferred_job_role") or "").lower().strip()
-        job_title = (job_profile.get("job_title") or "").lower().strip()
+        # 7. Role Match (15% Weight) with RoleTaxonomy precision
+        from app.services.role_taxonomy import RoleTaxonomy
 
-        if not pref_role:
-            role_pct = 75.0
-        elif pref_role in job_title or job_title in pref_role:
-            role_pct = 100.0
-        elif any(w in job_title for w in pref_role.split()):
-            role_pct = 85.0
-        elif ("data" in pref_role and "data" in job_title) or ("dev" in pref_role and ("engineer" in job_title or "developer" in job_title)):
-            role_pct = 75.0
+        pref_role = (candidate_user.get("preferred_job_role") or "").strip()
+        job_title_raw = str(job_profile.get("job_title") or job_profile.get("title") or "").strip()
+        job_title = job_title_raw.lower()
+
+        is_strictly_excluded = False
+        if pref_role:
+            eval_res = RoleTaxonomy.evaluate_role_match(pref_role, job_title_raw)
+            if eval_res["status"] == "STRICT_EXCLUSION":
+                role_pct = 0.0
+                is_strictly_excluded = True
+            elif eval_res["status"] == "DIRECT_MATCH":
+                role_pct = 100.0
+            elif eval_res["status"] == "ALLOWED_EQUIVALENT":
+                role_pct = 90.0
+            elif eval_res["match"]:
+                role_pct = 80.0
+            else:
+                role_pct = 10.0
         else:
-            role_pct = 40.0
+            role_pct = 75.0
+
         role_points = round(role_pct * 0.15, 2)
 
         # 8. Location Match (10% Weight)
@@ -159,8 +169,12 @@ class JobMatchingEngine:
             weighted_ai = round(0.40 * ai_semantic_score, 2)
             final_match_score = float(deterministic_score)
 
-        final_match_score = max(0.0, min(100.0, final_match_score))
-        display_score = round(final_match_score, 1)
+        if is_strictly_excluded:
+            final_match_score = 0.0
+            display_score = 0.0
+        else:
+            final_match_score = max(0.0, min(100.0, final_match_score))
+            display_score = round(final_match_score, 1)
 
         # 11. Match Category based on final score
         if display_score >= 90:

@@ -13,26 +13,36 @@ class ArbeitnowJobProvider(BaseJobProvider):
 
     def __init__(self):
         self.base_url = "https://www.arbeitnow.com/api/job-board-api"
-        self.timeout = getattr(Config, 'JOB_API_TIMEOUT', 10)
+        self.timeout = min(getattr(Config, 'JOB_API_TIMEOUT', 6), 6)
         self.provider_name = "Arbeitnow Live Board"
+        self.session = requests.Session()
+        self._cache = {}
 
     def is_configured(self) -> bool:
         return True
 
     def search_jobs(self, search_params: dict) -> dict:
+        import time, copy
         keyword = search_params.get('keyword', '').strip().lower()
         location = search_params.get('location', '').strip().lower()
         page = search_params.get('page', 1)
         limit = search_params.get('limit', getattr(Config, 'JOB_API_DEFAULT_RESULTS', 50))
 
+        cache_key = (keyword, location, page, limit)
+        now_ts = time.time()
+        if cache_key in self._cache:
+            entry = self._cache[cache_key]
+            if now_ts - entry["timestamp"] < 1800:
+                return copy.deepcopy(entry["data"])
+
         try:
             url = f"{self.base_url}?page={page}"
-            response = requests.get(url, timeout=self.timeout)
+            response = self.session.get(url, timeout=self.timeout)
             if response.status_code == 200:
                 data = response.json()
                 raw_jobs = data.get('data', [])
 
-                keyword_tokens = [t for t in keyword.split() if len(t) > 1]
+                keyword_tokens = [t for t in keyword.split() if len(t) > 2]
 
                 filtered_jobs = []
                 for item in raw_jobs:
@@ -42,11 +52,10 @@ class ArbeitnowJobProvider(BaseJobProvider):
                     job_desc = str(item.get('description', '')).lower()
                     tags_str = " ".join([str(t).lower() for t in item.get('tags', [])])
 
-                    searchable_text = f"{job_title} {company_name} {tags_str} {job_desc}"
-
+                    # Require title match for relevance
                     if keyword_tokens:
-                        match_found = any(token in searchable_text for token in keyword_tokens)
-                        if not match_found:
+                        title_match = any(token in job_title for token in keyword_tokens)
+                        if not title_match:
                             continue
 
                     if location:
@@ -65,7 +74,7 @@ class ArbeitnowJobProvider(BaseJobProvider):
 
                 normalized_jobs = [self._normalize_arbeitnow_job(j) for j in paginated_raw]
 
-                return {
+                result_payload = {
                     "success": True,
                     "source": self.provider_name,
                     "total": total,
@@ -73,6 +82,8 @@ class ArbeitnowJobProvider(BaseJobProvider):
                     "limit": limit,
                     "jobs": normalized_jobs
                 }
+                self._cache[cache_key] = {"timestamp": now_ts, "data": result_payload}
+                return result_payload
             else:
                 logger.error(f"Arbeitnow API HTTP {response.status_code}: {response.text}")
                 return {"success": False, "error": f"HTTP_{response.status_code}", "message": "Live job provider temporarily unavailable."}

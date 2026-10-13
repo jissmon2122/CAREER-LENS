@@ -110,13 +110,26 @@ def get_recommended_jobs():
     min_match_param = request.args.get('min_match', '')
     force_refresh = request.args.get('refresh', '').lower() in ['true', '1', 'yes']
 
+    # Target Role Resolution Priority:
+    # 1. User-selected target role from UI query param
+    # 2. User profile preferred_job_role
+    # 3. Resume analysis primary_search_keyword / inferred_roles
+    user_pref_role = (user_json.get('preferred_job_role') or '').strip()
+    resume_primary_kw = (candidate_profile.get("primary_search_keyword") or '').strip()
+    inferred_roles = candidate_profile.get("inferred_roles", [])
+    first_inferred_role = inferred_roles[0].strip() if inferred_roles else ''
+
+    target_role = role_param or user_pref_role or resume_primary_kw or first_inferred_role
+    if target_role:
+        user_json['preferred_job_role'] = target_role
+
     # Fast in-memory cache check: if user already has computed recommendations with these params, return immediately (0ms)
-    cache_key = (user_id, latest_resume_id, role_param, location_param, is_remote, experience_param, min_match_param)
+    cache_key = (user_id, latest_resume_id, target_role, location_param, is_remote, experience_param, min_match_param)
     now_ts = time.time()
     if not force_refresh and cache_key in _RECOMMENDATIONS_CACHE:
         cache_entry = _RECOMMENDATIONS_CACHE[cache_key]
         if now_ts - cache_entry['timestamp'] < _RECOMMENDATIONS_CACHE_TTL:
-            logger.info(f"Serving live recommendations from memory cache for user {user_id}")
+            logger.info(f"Serving live recommendations from memory cache for user {user_id} (role={target_role})")
             return jsonify(cache_entry['data']), 200
 
     # Location Resolution Priority: 1. UI Selected -> 2. User Profile -> 3. Resume -> 4. Default "India"
@@ -130,9 +143,10 @@ def get_recommended_jobs():
         if not any(g in location_param.lower() for g in ["remote", "worldwide", "global"]):
             target_country = "GLOBAL"
 
-    # Build controlled multi-role search queries dynamically from resume profile
-    if role_param:
-        search_keywords = [role_param]
+    # Build controlled search queries dynamically:
+    # If target_role is explicitly identified, focus directly on that role
+    if target_role:
+        search_keywords = [target_role]
     else:
         profile_queries = candidate_profile.get("search_queries", [])
         primary = candidate_profile.get("primary_search_keyword")
@@ -150,7 +164,7 @@ def get_recommended_jobs():
 
         if not search_keywords:
             search_keywords = [candidate_profile.get("professional_identity", "Professional")]
-        # Prioritize top 2 most targeted queries to keep latency low (Adzuna provides up to 50 jobs per query)
+        # Prioritize top 2 most targeted queries to keep latency low
         search_keywords = search_keywords[:2]
 
     # Target search locations: under GEO_POLICY = WORLDWIDE, query broad/location-agnostic or candidate preferred location
@@ -245,7 +259,7 @@ def get_recommended_jobs():
         job["location_weight"] = loc_res.get("location_weight")
 
         # 6c. Role & Professional Domain Relevance Gate (Hard Filter)
-        role_rel = RoleRelevanceService.evaluate_role_relevance(candidate_profile, job)
+        role_rel = RoleRelevanceService.evaluate_role_relevance(candidate_profile, job, target_role=target_role)
         job["role_relevance_status"] = role_rel.get("role_relevance_status")
         job["detected_job_role"] = role_rel.get("detected_job_role")
         job["role_relevance_reason"] = role_rel.get("reason")
@@ -454,6 +468,7 @@ def get_recommended_jobs():
             "status": status_code,
             "geo_policy": "WORLDWIDE",
             "message": msg,
+            "target_role": target_role,
             "candidate_profile": candidate_profile,
             "last_updated_at": formatted_time,
             "last_verified_at": formatted_time,
@@ -478,6 +493,7 @@ def get_recommended_jobs():
         "status": "LIVE_RECOMMENDATIONS_AVAILABLE",
         "geo_policy": "WORLDWIDE",
         "message": f"Personalized live job recommendations generated successfully for candidate profile ({candidate_profile.get('professional_domain', '').title()}).",
+        "target_role": target_role,
         "candidate_profile": candidate_profile,
         "last_updated_at": formatted_time,
         "last_verified_at": formatted_time,
@@ -629,6 +645,16 @@ def search_live_jobs():
 
         raw_jobs = provider_res.get('jobs', [])
         normalized_jobs = DeduplicationAndCacheEngine.process_and_cache_jobs(raw_jobs)
+
+        if keyword:
+            from app.services.role_taxonomy import RoleTaxonomy
+            filtered = []
+            for j in normalized_jobs:
+                t_match = RoleTaxonomy.evaluate_role_match(keyword, j.get('title', ''))
+                if t_match.get("is_strictly_excluded"):
+                    continue
+                filtered.append(j)
+            normalized_jobs = filtered
 
         now_iso = datetime.now(timezone.utc).isoformat()
 

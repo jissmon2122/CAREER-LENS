@@ -5,20 +5,27 @@ from app.services.job_providers.adzuna_provider import AdzunaJobProvider
 from app.services.job_providers.jooble_provider import JoobleJobProvider
 from app.services.job_providers.indian_api_provider import IndianApiJobProvider
 
+from app.services.job_providers.remotive_provider import RemotiveJobProvider
+from app.services.job_providers.arbeitnow_provider import ArbeitnowJobProvider
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 logger = logging.getLogger(__name__)
 
 class MultiSourceJobProvider(BaseJobProvider):
     """
     Production Multi-Source Live Job Aggregator.
-    Queries authorized live job APIs (Adzuna, Jooble, IndianAPI) independently.
+    Queries authorized live job APIs (Adzuna, Remotive, Arbeitnow, Jooble, IndianAPI) concurrently.
+    Returns valid partial results immediately if any provider is slow or fails.
     Zero mock/synthetic jobs.
     """
 
     def __init__(self):
         self.adzuna = AdzunaJobProvider()
+        self.remotive = RemotiveJobProvider()
+        self.arbeitnow = ArbeitnowJobProvider()
         self.jooble = JoobleJobProvider()
         self.indianapi = IndianApiJobProvider()
-        self.provider_name = "Production Multi-Source Live Aggregator (Adzuna + Jooble + IndianAPI)"
+        self.provider_name = "Production Multi-Source Live Aggregator (Adzuna + Remotive + Arbeitnow + Jooble)"
 
     def is_configured(self) -> bool:
         return True
@@ -26,6 +33,8 @@ class MultiSourceJobProvider(BaseJobProvider):
     def get_provider_health(self) -> dict:
         return {
             "adzuna": "CONFIGURED" if self.adzuna.is_configured() else "NOT_CONFIGURED",
+            "remotive": "CONFIGURED" if self.remotive.is_configured() else "NOT_CONFIGURED",
+            "arbeitnow": "CONFIGURED" if self.arbeitnow.is_configured() else "NOT_CONFIGURED",
             "jooble": "CONFIGURED" if self.jooble.is_configured() else "NOT_CONFIGURED",
             "indianapi": "CONFIGURED" if self.indianapi.is_configured() else "NOT_CONFIGURED"
         }
@@ -35,61 +44,60 @@ class MultiSourceJobProvider(BaseJobProvider):
         provider_status = {}
         providers_used = []
 
-        # 1. Query Adzuna
+        providers_to_query = []
         if self.adzuna.is_configured():
-            try:
-                res = self.adzuna.search_jobs(search_params)
-                if res.get("success"):
-                    adz_jobs = res.get("jobs", [])
-                    jobs.extend(adz_jobs)
-                    provider_status["adzuna"] = "LIVE_SUCCESS" if adz_jobs else "ZERO_RESULTS"
-                    if adz_jobs:
-                        providers_used.append("adzuna")
-                else:
-                    provider_status["adzuna"] = res.get("error", "PROVIDER_ERROR")
-            except Exception as e:
-                logger.error(f"Adzuna query error: {e}")
-                provider_status["adzuna"] = "PROVIDER_ERROR"
-        else:
-            provider_status["adzuna"] = "NOT_CONFIGURED"
-
-        # 2. Query Jooble
+            providers_to_query.append(("adzuna", self.adzuna))
+        if self.remotive.is_configured():
+            providers_to_query.append(("remotive", self.remotive))
+        if self.arbeitnow.is_configured():
+            providers_to_query.append(("arbeitnow", self.arbeitnow))
         if self.jooble.is_configured():
-            try:
-                res = self.jooble.search_jobs(search_params)
-                if res.get("success"):
-                    joo_jobs = res.get("jobs", [])
-                    jobs.extend(joo_jobs)
-                    provider_status["jooble"] = "LIVE_SUCCESS" if joo_jobs else "ZERO_RESULTS"
-                    if joo_jobs:
-                        providers_used.append("jooble")
-                else:
-                    provider_status["jooble"] = res.get("error", "PROVIDER_ERROR")
-            except Exception as e:
-                logger.error(f"Jooble query error: {e}")
-                provider_status["jooble"] = "PROVIDER_ERROR"
-        else:
-            provider_status["jooble"] = "NOT_CONFIGURED"
-
-        # 3. Query IndianAPI
+            providers_to_query.append(("jooble", self.jooble))
         if self.indianapi.is_configured():
-            try:
-                res = self.indianapi.search_jobs(search_params)
-                if res.get("success"):
-                    ind_jobs = res.get("jobs", [])
-                    jobs.extend(ind_jobs)
-                    provider_status["indianapi"] = "LIVE_SUCCESS" if ind_jobs else "ZERO_RESULTS"
-                    if ind_jobs:
-                        providers_used.append("indianapi")
-                else:
-                    provider_status["indianapi"] = res.get("error", "PROVIDER_ERROR")
-            except Exception as e:
-                logger.error(f"IndianAPI query error: {e}")
-                provider_status["indianapi"] = "PROVIDER_ERROR"
-        else:
-            provider_status["indianapi"] = "NOT_CONFIGURED"
+            providers_to_query.append(("indianapi", self.indianapi))
 
-        # Deduplicate in-memory by provider + provider_job_id & application_url
+        def _fetch_single_provider(name, prov_inst):
+            try:
+                t0 = time.time()
+                res = prov_inst.search_jobs(search_params)
+                elapsed = round(time.time() - t0, 3)
+                logger.info(f"Provider '{name}' responded in {elapsed}s: success={res.get('success')}, jobs={len(res.get('jobs', []))}")
+                return name, res
+            except Exception as e:
+                logger.error(f"Provider '{name}' failed: {e}")
+                return name, {"success": False, "error": "PROVIDER_ERROR", "jobs": []}
+
+        # Run configured providers in parallel using ThreadPoolExecutor
+        import time
+        max_workers = min(5, len(providers_to_query)) if providers_to_query else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_prov = {
+                executor.submit(_fetch_single_provider, name, inst): name 
+                for name, inst in providers_to_query
+            }
+            for future in as_completed(future_to_prov):
+                name = future_to_prov[future]
+                try:
+                    prov_name, res = future.result()
+                    if res.get("success"):
+                        p_jobs = res.get("jobs", [])
+                        jobs.extend(p_jobs)
+                        provider_status[prov_name] = "LIVE_SUCCESS" if p_jobs else "ZERO_RESULTS"
+                        if p_jobs:
+                            providers_used.append(prov_name)
+                    else:
+                        provider_status[prov_name] = res.get("error", "PROVIDER_ERROR")
+                except Exception as e:
+                    logger.error(f"Error reading future for provider '{name}': {e}")
+                    provider_status[name] = "PROVIDER_ERROR"
+
+        # Mark unconfigured providers
+        all_possible = ["adzuna", "remotive", "arbeitnow", "jooble", "indianapi"]
+        for p in all_possible:
+            if p not in provider_status:
+                provider_status[p] = "NOT_CONFIGURED"
+
+        # Deduplicate in-memory by provider + provider_job_id & application_url & normalized title/company
         seen_keys = set()
         deduped_raw_jobs = []
         for j in jobs:
@@ -110,17 +118,17 @@ class MultiSourceJobProvider(BaseJobProvider):
             seen_keys.add(key3)
             deduped_raw_jobs.append(j)
 
-        all_configured = [p for p, s in provider_status.items() if s != "NOT_CONFIGURED"]
+        all_configured = [p for p in all_possible if provider_status[p] != "NOT_CONFIGURED"]
         all_failed = len(all_configured) > 0 and all(provider_status[p] in ["PROVIDER_ERROR", "AUTH_FAILED", "TIMEOUT", "HTTP_500"] for p in all_configured)
 
         return {
-            "success": not all_failed,
+            "success": not all_failed or len(deduped_raw_jobs) > 0,
             "source": self.provider_name,
             "total": len(deduped_raw_jobs),
             "jobs": deduped_raw_jobs,
             "provider_status": provider_status,
             "providers_used": list(set(providers_used)),
-            "all_providers_failed": all_failed
+            "all_providers_failed": all_failed and len(deduped_raw_jobs) == 0
         }
 
     def verify_job_status(self, provider_job_id: str) -> str:
@@ -134,5 +142,5 @@ class ProviderFactory:
 
     @classmethod
     def get_provider(cls, provider_name: str = None) -> BaseJobProvider:
-        logger.info("Initializing Production Multi-Source Live Provider (Adzuna + Jooble + IndianAPI).")
+        logger.info("Initializing Production Multi-Source Live Provider (Adzuna + Remotive + Arbeitnow + Jooble).")
         return MultiSourceJobProvider()

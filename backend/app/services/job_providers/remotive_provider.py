@@ -13,30 +13,41 @@ class RemotiveJobProvider(BaseJobProvider):
 
     def __init__(self):
         self.base_url = "https://remotive.com/api/remote-jobs"
-        self.timeout = getattr(Config, 'JOB_API_TIMEOUT', 10)
+        self.timeout = min(getattr(Config, 'JOB_API_TIMEOUT', 6), 6)
         self.provider_name = "Remotive Live Feed"
+        self.session = requests.Session()
+        self._cache = {}
 
     def is_configured(self) -> bool:
         return True
 
     def search_jobs(self, search_params: dict) -> dict:
+        import time, copy
         keyword = search_params.get('keyword', '').strip().lower()
         location = search_params.get('location', '').strip().lower()
         page = search_params.get('page', 1)
         limit = search_params.get('limit', getattr(Config, 'JOB_API_DEFAULT_RESULTS', 50))
 
+        cache_key = (keyword, location, page, limit)
+        now_ts = time.time()
+        if cache_key in self._cache:
+            entry = self._cache[cache_key]
+            if now_ts - entry["timestamp"] < 1800:
+                return copy.deepcopy(entry["data"])
+
         params = {}
-        # Fetch broad list from Remotive API to do smart local matching
-        if keyword and len(keyword.split()) == 1:
-            params['search'] = keyword
+        if keyword:
+            first_token = keyword.split()[0]
+            if len(first_token) > 2:
+                params['search'] = first_token
 
         try:
-            response = requests.get(self.base_url, params=params, timeout=self.timeout)
+            response = self.session.get(self.base_url, params=params, timeout=self.timeout)
             if response.status_code == 200:
                 data = response.json()
                 raw_jobs = data.get('jobs', [])
 
-                keyword_tokens = [t for t in keyword.split() if len(t) > 1]
+                keyword_tokens = [t for t in keyword.split() if len(t) > 2]
 
                 filtered_jobs = []
                 for item in raw_jobs:
@@ -46,12 +57,10 @@ class RemotiveJobProvider(BaseJobProvider):
                     job_desc = str(item.get('description', '')).lower()
                     tags_str = " ".join([str(t).lower() for t in item.get('tags', [])])
 
-                    searchable_text = f"{job_title} {company_name} {tags_str} {job_desc}"
-
-                    # Smart token match: at least one key token must be in searchable text
+                    # Title must contain at least one significant keyword token
                     if keyword_tokens:
-                        match_found = any(token in searchable_text for token in keyword_tokens)
-                        if not match_found:
+                        title_match = any(token in job_title for token in keyword_tokens)
+                        if not title_match:
                             continue
 
                     # Location filter check (allow Remote/Worldwide if user searches specific city)
@@ -77,7 +86,7 @@ class RemotiveJobProvider(BaseJobProvider):
 
                 normalized_jobs = [self._normalize_remotive_job(j) for j in paginated_raw]
 
-                return {
+                result_payload = {
                     "success": True,
                     "source": self.provider_name,
                     "total": total,
@@ -85,6 +94,8 @@ class RemotiveJobProvider(BaseJobProvider):
                     "limit": limit,
                     "jobs": normalized_jobs
                 }
+                self._cache[cache_key] = {"timestamp": now_ts, "data": result_payload}
+                return result_payload
             else:
                 logger.error(f"Remotive API HTTP {response.status_code}: {response.text}")
                 return {"success": False, "error": f"HTTP_{response.status_code}", "message": "Live job provider temporarily unavailable."}

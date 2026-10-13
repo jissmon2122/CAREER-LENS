@@ -1,13 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useJobContext } from '../context/JobContext';
+import { useAuth } from '../context/AuthContext';
 import { jobAPI } from '../services/api';
 import LiveJobCard from '../components/LiveJobCard';
 import JobMatchModal from '../components/JobMatchModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 
+const STANDARD_ROLES = [
+  "Data Analyst",
+  "Software Engineer",
+  "Machine Learning Engineer",
+  "Data Scientist",
+  "Frontend Developer",
+  "Backend Developer",
+  "Full Stack Developer",
+  "DevOps Engineer"
+];
+
 const LiveJobSearchPage = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   const {
     liveJobsData,
@@ -28,6 +41,12 @@ const LiveJobSearchPage = () => {
 
   const { selectedRole, location, remote, experience, minMatch, activeTab } = filters;
   const [selectedMatch, setSelectedMatch] = useState(null);
+
+  const availableRoles = Array.from(new Set([
+    ...(user?.preferred_job_role ? [user.preferred_job_role] : []),
+    ...(candidateProfile?.inferred_roles || []),
+    ...STANDARD_ROLES
+  ].filter(Boolean)));
 
   // Initial load: only fetch if liveJobsData is not already cached in context
   useEffect(() => {
@@ -211,13 +230,28 @@ const LiveJobSearchPage = () => {
 
           {/* Search & Refining Filter Bar */}
           <div className="glass-card" style={{ marginBottom: '1.75rem', padding: '1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 600 }}>Active Target Role:</span>
+              <span className="badge badge-primary" style={{ fontSize: '0.8rem', padding: '0.3rem 0.65rem' }}>
+                🎯 {selectedRole || liveJobsData?.target_role || candidateProfile?.inferred_roles?.[0] || 'Auto-Detected Profile Roles'}
+              </span>
+              {selectedRole && (
+                <button
+                  onClick={() => handleFilterChange('selectedRole', '')}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+                >
+                  (Reset Role)
+                </button>
+              )}
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
               {/* Target Role Dropdown */}
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '0.8rem' }}>Filter by Inferred Role</label>
+                <label className="form-label" style={{ fontSize: '0.8rem' }}>Filter by Target Role</label>
                 <select className="form-select" value={selectedRole} onChange={(e) => handleFilterChange('selectedRole', e.target.value)}>
-                  <option value="">All Inferred Roles</option>
-                  {candidateProfile?.inferred_roles?.map(r => (
+                  <option value="">All Relevant Roles</option>
+                  {availableRoles.map(r => (
                     <option key={r} value={r}>{r}</option>
                   ))}
                 </select>
@@ -312,7 +346,7 @@ const LiveJobSearchPage = () => {
           {/* Main Results Grid */}
           {loading && !liveJobsData ? (
             <div className="glass-card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center' }}>
-              <LoadingSpinner text="Retrieving live vacancies and calculating 60/40 AI hybrid match scores from your resume..." />
+              <LoadingSpinner text={`Retrieving live vacancies and calculating AI match scores for ${selectedRole || 'your target role'}...`} />
             </div>
           ) : displayedJobs && displayedJobs.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
@@ -329,16 +363,29 @@ const LiveJobSearchPage = () => {
             </div>
           ) : (
             <div className="glass-card" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>🔍</div>
               <h3 style={{ fontSize: '1.3rem', fontWeight: 700, marginBottom: '0.5rem' }}>No Matching Vacancies Found</h3>
-              <p style={{ color: 'var(--text-muted)', maxWidth: '500px', margin: '0 auto 1.5rem' }}>
-                No active live vacancies matched your selected refining filters. Try clearing your location or experience filters.
+              <p style={{ color: 'var(--text-muted)', maxWidth: '540px', margin: '0 auto 1.5rem', fontSize: '0.95rem', lineHeight: '1.5' }}>
+                {selectedRole
+                  ? `No verified live vacancies currently matched "${selectedRole}". All listings are queried directly from real providers without fake entries.`
+                  : "No active live vacancies matched your selected refining filters. Try clearing your location or experience filters."}
               </p>
-              <button
-                onClick={() => setFilters({ selectedRole: '', location: '', remote: '', experience: '', minMatch: '', activeTab: 'all' })}
-                className="btn btn-secondary"
-              >
-                Reset Filters
-              </button>
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => setFilters({ selectedRole: '', location: '', remote: '', experience: '', minMatch: '', activeTab: 'all' })}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.85rem' }}
+                >
+                  Reset All Filters
+                </button>
+                <button
+                  onClick={() => refreshLiveJobs(true)}
+                  className="btn btn-primary"
+                  style={{ fontSize: '0.85rem' }}
+                >
+                  🔄 Retry Live Search
+                </button>
+              </div>
             </div>
           )}
         </>

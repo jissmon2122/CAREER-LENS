@@ -82,20 +82,20 @@ class RoleRelevanceService:
     }
 
     @classmethod
-    def evaluate_role_relevance(cls, candidate_profile: dict, job: dict) -> dict:
+    def evaluate_role_relevance(cls, candidate_profile: dict, job: dict, target_role: str = None) -> dict:
         """
-        Evaluates role relevance between candidate profile & target job.
-        Returns dict:
-          - eligible: bool
-          - role_relevance_status: "DIRECT_ROLE_MATCH" | "RELATED_ROLE" | "WEAKLY_RELATED" | "UNRELATED" | "UNKNOWN"
-          - detected_job_role: str
-          - reason: str
+        Evaluates role relevance between candidate profile / explicit target role & target job.
+        Prioritizes user's explicitly intended target_role whenever supplied.
+        Enforces RoleTaxonomy strict exclusion filters before ranking.
         """
-        title = str(job.get("title") or job.get("job_title") or "").strip().lower()
+        from app.services.role_taxonomy import RoleTaxonomy
+
+        raw_title = str(job.get("title") or job.get("job_title") or "").strip()
+        title = raw_title.lower()
         desc = str(job.get("raw_description") or job.get("clean_description") or "").strip().lower()
         searchable_job = f"{title} {desc[:500]}"
 
-        if not title:
+        if not raw_title:
             return {
                 "eligible": False,
                 "role_relevance_status": "UNKNOWN",
@@ -103,12 +103,56 @@ class RoleRelevanceService:
                 "reason": "Missing job title."
             }
 
-        cand_domain = str(candidate_profile.get("professional_domain") or "GENERAL_PROFESSIONAL").upper().strip()
+        # 1. Primary Priority: Explicit User Target Role OR Inferred Primary Target Role
+        primary_role = (target_role or candidate_profile.get("target_role") or candidate_profile.get("preferred_job_role") or "").strip()
         inferred_roles = candidate_profile.get("inferred_roles", [])
-        cand_roles_lower = [str(r).lower().strip() for r in inferred_roles if r]
-        core_skills = [str(s).lower().strip() for s in candidate_profile.get("core_skills", []) if s]
 
-        # Detect the job's domain
+        # Check explicit primary role first using RoleTaxonomy
+        if primary_role:
+            eval_res = RoleTaxonomy.evaluate_role_match(primary_role, raw_title)
+            if eval_res["status"] == "STRICT_EXCLUSION":
+                return {
+                    "eligible": False,
+                    "role_relevance_status": "UNRELATED",
+                    "detected_job_role": raw_title,
+                    "reason": eval_res["reason"]
+                }
+            elif eval_res["match"]:
+                return {
+                    "eligible": True,
+                    "role_relevance_status": "DIRECT_ROLE_MATCH" if eval_res["status"] == "DIRECT_MATCH" else "RELATED_ROLE",
+                    "detected_job_role": primary_role,
+                    "reason": eval_res["reason"]
+                }
+            else:
+                # Target role was explicitly specified and this job did NOT match the taxonomy
+                return {
+                    "eligible": False,
+                    "role_relevance_status": "UNRELATED",
+                    "detected_job_role": raw_title,
+                    "reason": f"Vacancy '{raw_title}' does not match explicitly selected target role '{primary_role}'."
+                }
+
+        # 2. Check each inferred role against RoleTaxonomy
+        cand_roles_lower = [str(r).lower().strip() for r in inferred_roles if r]
+        for role in inferred_roles:
+            eval_res = RoleTaxonomy.evaluate_role_match(role, raw_title)
+            if eval_res["status"] == "STRICT_EXCLUSION":
+                return {
+                    "eligible": False,
+                    "role_relevance_status": "UNRELATED",
+                    "detected_job_role": raw_title,
+                    "reason": eval_res["reason"]
+                }
+            elif eval_res["match"]:
+                return {
+                    "eligible": True,
+                    "role_relevance_status": "DIRECT_ROLE_MATCH" if eval_res["status"] == "DIRECT_MATCH" else "RELATED_ROLE",
+                    "detected_job_role": role,
+                    "reason": eval_res["reason"]
+                }
+
+        # 3. Detect Job Domain
         detected_job_domain = None
         for dom_name, kw_list in cls.DOMAIN_KEYWORDS.items():
             for kw in kw_list:
@@ -118,57 +162,49 @@ class RoleRelevanceService:
             if detected_job_domain:
                 break
 
-        # 1. Direct Target Role Match check (job title contains candidate's inferred target role)
-        for role in cand_roles_lower:
-            clean_role = role.replace("junior ", "").replace(" intern", "").replace("senior ", "").strip()
-            if clean_role and clean_role in title:
-                return {
-                    "eligible": True,
-                    "role_relevance_status": "DIRECT_ROLE_MATCH",
-                    "detected_job_role": role.title(),
-                    "reason": f"Job title explicitly matches candidate target role '{role.title()}'."
-                }
+        cand_domain = str(candidate_profile.get("professional_domain") or "GENERAL_PROFESSIONAL").upper().strip()
 
-        # 2. Domain Match Check: Candidate Domain vs Job Domain
+        # Hard cross-domain check: prevent accountant showing up for software_it/data_analytics
+        if cand_domain in ["SOFTWARE_IT", "DATA_ANALYTICS", "DATA_SCIENCE_AI"] and detected_job_domain in ["ACCOUNTING_FINANCE", "ARCHITECTURE", "HEALTHCARE"]:
+            return {
+                "eligible": False,
+                "role_relevance_status": "UNRELATED",
+                "detected_job_role": raw_title,
+                "reason": f"Vacancy in {detected_job_domain.title()} is strictly unrelated to candidate's technical profile."
+            }
+
+        # 4. Domain Match Check: Candidate Domain vs Job Domain
         if cand_domain in cls.DOMAIN_KEYWORDS and detected_job_domain:
             if cand_domain == detected_job_domain:
                 return {
                     "eligible": True,
                     "role_relevance_status": "RELATED_ROLE",
-                    "detected_job_role": title.title(),
+                    "detected_job_role": raw_title,
                     "reason": f"Vacancy aligns with candidate's professional domain ({cand_domain.title()})."
                 }
             else:
                 return {
                     "eligible": False,
                     "role_relevance_status": "UNRELATED",
-                    "detected_job_role": title.title(),
+                    "detected_job_role": raw_title,
                     "reason": f"Vacancy in {detected_job_domain.title()} is unrelated to candidate's domain ({cand_domain.title()})."
                 }
 
-        # 3. Core skill overlap check
+        # 5. Core skill overlap check only if within same general technical umbrella
+        core_skills = [str(s).lower().strip() for s in candidate_profile.get("core_skills", []) if s]
         matched_skills = [s for s in core_skills if s in searchable_job]
-        if matched_skills:
+        if len(matched_skills) >= 2:
             return {
                 "eligible": True,
-                "role_relevance_status": "RELATED_ROLE" if len(matched_skills) >= 2 else "WEAKLY_RELATED",
-                "detected_job_role": title.title(),
+                "role_relevance_status": "RELATED_ROLE",
+                "detected_job_role": raw_title,
                 "reason": f"Matched candidate core domain skills ({', '.join(matched_skills[:3])})."
             }
 
-        # 4. Fallback for General / Unmapped Domains
-        if cand_domain != "GENERAL_PROFESSIONAL" and detected_job_domain and cand_domain != detected_job_domain:
-            return {
-                "eligible": False,
-                "role_relevance_status": "UNRELATED",
-                "detected_job_role": title.title(),
-                "reason": f"Vacancy '{title.title()}' does not align with candidate profile ({cand_domain.title()})."
-            }
-
         return {
-            "eligible": True,
-            "role_relevance_status": "WEAKLY_RELATED",
-            "detected_job_role": title.title(),
-            "reason": "General role alignment."
+            "eligible": False,
+            "role_relevance_status": "UNRELATED",
+            "detected_job_role": raw_title,
+            "reason": f"Vacancy '{raw_title}' does not match candidate target roles or professional domain."
         }
 
