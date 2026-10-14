@@ -17,7 +17,7 @@ class IndianApiJobProvider(BaseJobProvider):
         self.api_key = Config.INDIANAPI_API_KEY
         self.base_url = Config.INDIANAPI_BASE_URL.rstrip('/')
         self.limit = Config.INDIANAPI_RESULTS_LIMIT
-        self.timeout = Config.INDIANAPI_TIMEOUT
+        self.timeout = (2.5, 4.0)
         self.provider_name = "IndianAPI Jobs"
 
     def is_configured(self) -> bool:

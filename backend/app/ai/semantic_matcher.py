@@ -39,7 +39,7 @@ class SemanticMatcher:
         s = skill.lower().strip()
         return self.SKILL_ALIASES.get(s, s)
 
-    def categorize_skills(self, candidate_skills: list, job_skills: list, candidate_skill_embeddings: dict = None) -> list:
+    def categorize_skills(self, candidate_skills: list, job_skills: list, candidate_skill_embeddings: dict = None, compute_semantic: bool = True) -> list:
         """
         Categorize job required skills against candidate skills into:
         - EXACT_MATCH
@@ -81,9 +81,9 @@ class SemanticMatcher:
                 })
                 continue
 
-            # 3. Semantic Match (if AI available)
+            # 3. Semantic Match (if AI available and enabled for this request)
             matched_sematically = False
-            if embedding_service.is_available():
+            if compute_semantic and embedding_service.is_available():
                 req_emb = embedding_service.get_embedding(req_raw)
                 best_sim = 0.0
                 best_cand = None
@@ -135,7 +135,8 @@ class SemanticMatcher:
         job_skills: list,
         resume_embedding=None,
         candidate_skill_embeddings: dict = None,
-        job_embedding=None
+        job_embedding=None,
+        compute_skill_embeddings: bool = True
     ) -> dict:
         """
         Compute overall semantic similarity score and detailed skill categorization.
@@ -145,13 +146,13 @@ class SemanticMatcher:
             return {
                 "ai_available": False,
                 "ai_semantic_score": 0.0,
-                "skill_categorization": self.categorize_skills(candidate_skills, job_skills),
+                "skill_categorization": self.categorize_skills(candidate_skills, job_skills, compute_semantic=False),
                 "explanation": "AI embedding service is currently offline or disabled. Falling back to deterministic analysis."
             }
 
         # Truncate text blocks to avoid tokenizer slowdown on CPU
-        clean_resume = (resume_text or "").strip()[:1200]
-        clean_job = (job_description or "").strip()[:1200]
+        clean_resume = (resume_text or "").strip()[:600]
+        clean_job = (job_description or "").strip()[:600]
 
         # Calculate cosine similarity using precomputed embeddings if available
         if resume_embedding is not None and job_embedding is not None:
@@ -171,7 +172,8 @@ class SemanticMatcher:
         skill_cats = self.categorize_skills(
             candidate_skills or [],
             job_skills or [],
-            candidate_skill_embeddings=candidate_skill_embeddings
+            candidate_skill_embeddings=candidate_skill_embeddings,
+            compute_semantic=compute_skill_embeddings
         )
 
         matched_count = sum(1 for item in skill_cats if item["status"] == "matched")

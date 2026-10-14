@@ -13,7 +13,7 @@ class ArbeitnowJobProvider(BaseJobProvider):
 
     def __init__(self):
         self.base_url = "https://www.arbeitnow.com/api/job-board-api"
-        self.timeout = min(getattr(Config, 'JOB_API_TIMEOUT', 6), 6)
+        self.timeout = (2.5, 4.0)
         self.provider_name = "Arbeitnow Live Board"
         self.session = requests.Session()
         self._cache = {}

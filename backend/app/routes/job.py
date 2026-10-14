@@ -205,7 +205,7 @@ def get_recommended_jobs():
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_fetch_provider, kw, loc): (kw, loc) for kw, loc in query_tasks}
             try:
-                for future in as_completed(futures, timeout=8.0):
+                for future in as_completed(futures, timeout=5.0):
                     provider_res = future.result()
                     p_status = provider_res.get('provider_status', {})
                     if p_status:
@@ -227,7 +227,7 @@ def get_recommended_jobs():
                                 seen_job_keys.add(dedup_key)
                                 raw_live_jobs.append(item)
             except FuturesTimeoutError:
-                logger.warning("Timed out waiting for some live provider query tasks (8s limit); proceeding with gathered results.")
+                logger.warning("Timed out waiting for some live provider query tasks (5s limit); proceeding with gathered results.")
 
         raw_jobs_count = len(raw_live_jobs)
 
@@ -382,7 +382,7 @@ def get_recommended_jobs():
                     j.get("description") or
                     j.get("job_description") or
                     f"{j.get('title', '')} {' '.join(j.get('required_skills', []))}"
-                )[:1200]
+                )[:400]
                 for j in eligible_jobs
             ]
             job_embeddings = embedding_service.get_embeddings_batch(job_descs)
@@ -402,7 +402,8 @@ def get_recommended_jobs():
                 user_json,
                 job,
                 candidate_context=candidate_context,
-                precomputed_job_embedding=job_emb
+                precomputed_job_embedding=job_emb,
+                compute_skill_embeddings=False
             )
             if match_res:
                 raw_match = match_res.get("final_match_score", 0)

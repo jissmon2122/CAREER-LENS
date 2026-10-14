@@ -21,7 +21,7 @@ class AdzunaJobProvider(BaseJobProvider):
         self.country = (Config.ADZUNA_COUNTRY or 'in').lower()
         self.base_url = Config.ADZUNA_BASE_URL or "https://api.adzuna.com/v1/api/jobs"
         self.results_per_page = Config.ADZUNA_RESULTS_PER_PAGE or 50
-        self.timeout = Config.ADZUNA_TIMEOUT or 8
+        self.timeout = (2.5, 4.0)
         self.provider_name = "Adzuna Jobs"
         self.session = requests.Session()
         self._cache = {}

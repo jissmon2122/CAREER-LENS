@@ -55,7 +55,7 @@ class JobMatchingEngine:
         }
 
     @classmethod
-    def calculate_job_match(cls, resume_analysis, candidate_user, job_profile, candidate_context=None, precomputed_job_embedding=None):
+    def calculate_job_match(cls, resume_analysis, candidate_user, job_profile, candidate_context=None, precomputed_job_embedding=None, compute_skill_embeddings=True):
         """
         Compute deterministic match between candidate's analyzed resume & dataset job profile.
         
@@ -206,7 +206,8 @@ class JobMatchingEngine:
                     job_skills=job_req_skills,
                     resume_embedding=resume_emb,
                     candidate_skill_embeddings=cand_skill_embs,
-                    job_embedding=precomputed_job_embedding
+                    job_embedding=precomputed_job_embedding,
+                    compute_skill_embeddings=compute_skill_embeddings
                 )
                 ai_semantic_score = float(ai_res.get("ai_semantic_score", 0.0))
                 semantic_skill_categorization = ai_res.get("skill_categorization", [])

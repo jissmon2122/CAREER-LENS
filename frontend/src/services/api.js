@@ -33,10 +33,17 @@ api.interceptors.response.use(
   (error) => {
     if (error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'))) {
       if (!error.response) {
+        const reqUrl = error.config?.url || '';
+        let timeoutMsg = 'Request timed out. The server is taking longer than expected to respond. Please try again.';
+        if (reqUrl.includes('/jobs/')) {
+          timeoutMsg = 'Request timed out. Live search is taking longer than expected. Please retry or adjust filters.';
+        } else if (reqUrl.includes('/auth/')) {
+          timeoutMsg = 'Authentication request timed out. Please check your connection and try again.';
+        }
         error.response = {
           data: {
             success: false,
-            message: 'Request timed out. Live search is taking longer than expected. Please retry or adjust filters.'
+            message: timeoutMsg
           }
         };
       }

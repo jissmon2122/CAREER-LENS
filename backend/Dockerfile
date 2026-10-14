@@ -24,6 +24,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Download default spaCy English model for NLP text processing
 RUN python -m spacy download en_core_web_sm || true
 
+# Pre-cache SentenceTransformer model to eliminate cold-start download latency on Render
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')" || true
+
 # Copy backend application source code
 COPY . /app/
 
@@ -33,4 +36,4 @@ RUN mkdir -p /app/uploads/resumes
 EXPOSE 5000
 
 # Run with Gunicorn WSGI server in production (bind dynamically to Render's $PORT)
-CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000} --workers 1 --threads 4 --timeout 120"]
+CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000} --workers 2 --threads 4 --worker-class gthread --timeout 120"]

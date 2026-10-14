@@ -13,7 +13,7 @@ class RemotiveJobProvider(BaseJobProvider):
 
     def __init__(self):
         self.base_url = "https://remotive.com/api/remote-jobs"
-        self.timeout = min(getattr(Config, 'JOB_API_TIMEOUT', 6), 6)
+        self.timeout = (2.5, 4.0)
         self.provider_name = "Remotive Live Feed"
         self.session = requests.Session()
         self._cache = {}

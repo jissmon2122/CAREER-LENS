@@ -62,10 +62,10 @@ def create_app():
     # Initialize MongoDB connection
     Database.initialize(app)
 
-    # Initialize AI Embedding Service on Startup
+    # Initialize AI Embedding Service on Startup (lazy load on first inference)
     if app.config.get('AI_ENABLED', True):
         from app.ai.embedding_service import embedding_service
-        embedding_service.initialize(app.config.get('AI_MODEL_NAME'))
+        embedding_service.initialize(app.config.get('AI_MODEL_NAME'), preload=False)
 
     # Import and register Blueprints
     from app.routes.auth import auth_bp

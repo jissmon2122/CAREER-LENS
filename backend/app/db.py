@@ -22,10 +22,11 @@ class Database:
         db_name = Config.DATABASE_NAME
         
         try:
+            import threading
             client_options = {
-                "serverSelectionTimeoutMS": 5000,
-                "connectTimeoutMS": 5000,
-                "socketTimeoutMS": 10000,
+                "serverSelectionTimeoutMS": 3000,
+                "connectTimeoutMS": 3000,
+                "socketTimeoutMS": 5000,
             }
             if "mongodb+srv://" in mongo_uri or "ssl=true" in mongo_uri.lower() or "tls=true" in mongo_uri.lower():
                 try:
@@ -40,8 +41,8 @@ class Database:
             logger.info(f"Successfully connected to MongoDB: {db_name}")
             print(f"[OK] Connected to MongoDB ({db_name})")
             
-            # Create automated database indexes
-            cls._create_indexes()
+            # Create automated database indexes in background to keep worker startup non-blocking
+            threading.Thread(target=cls._create_indexes, daemon=True, name="DBIndexInitThread").start()
         except Exception as err:
             sanitized_host = mongo_uri.split('@')[-1].split('?')[0] if '@' in mongo_uri else mongo_uri.split('?')[0]
             logger.warning(f"MongoDB connection warning ({sanitized_host}): {err}. Running in in-memory mode.")

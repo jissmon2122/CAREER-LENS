@@ -17,7 +17,7 @@ class JoobleJobProvider(BaseJobProvider):
         self.api_key = Config.JOOBLE_API_KEY
         self.base_url = Config.JOOBLE_BASE_URL.rstrip('/')
         self.results_per_page = Config.JOOBLE_RESULTS_PER_PAGE
-        self.timeout = Config.JOOBLE_TIMEOUT
+        self.timeout = (2.5, 4.0)
         self.provider_name = "Jooble Jobs"
 
     def is_configured(self) -> bool:

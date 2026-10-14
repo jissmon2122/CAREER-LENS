@@ -18,14 +18,14 @@ class EmbeddingService:
         self._cache = {}
         self._lock = threading.Lock()
 
-    def initialize(self, model_name=None, preload=True):
+    def initialize(self, model_name=None, preload=False):
         if model_name:
             self._model_name = model_name
         try:
             import numpy as np
             self.np = np
             self._is_available = True
-            logger.info(f"AI Embedding Service initializing for model '{self._model_name}'...")
+            logger.info(f"AI Embedding Service ready (lazy on-demand loading) for model '{self._model_name}'.")
             if preload:
                 thread = threading.Thread(
                     target=self._ensure_model_loaded,
@@ -33,7 +33,6 @@ class EmbeddingService:
                     daemon=True
                 )
                 thread.start()
-            logger.info(f"AI Embedding Service initialized (async preload) for model '{self._model_name}'.")
         except Exception as e:
             logger.warning(f"AI Embedding Service unavailable: {e}")
             self._is_available = False
