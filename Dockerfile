@@ -32,5 +32,5 @@ RUN mkdir -p /app/uploads/resumes
 
 EXPOSE 5000
 
-# Run with Gunicorn WSGI server in production
-CMD ["gunicorn", "wsgi:app", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "120"]
+# Run with Gunicorn WSGI server in production (bind dynamically to Render's $PORT)
+CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000} --workers 1 --threads 4 --timeout 120"]

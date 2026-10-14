@@ -1,6 +1,8 @@
 import os
 import logging
 
+import threading
+
 logger = logging.getLogger(__name__)
 
 class EmbeddingService:
@@ -14,6 +16,7 @@ class EmbeddingService:
         self._is_available = False
         self._model_name = "sentence-transformers/all-MiniLM-L6-v2"
         self._cache = {}
+        self._lock = threading.Lock()
 
     def initialize(self, model_name=None, preload=True):
         if model_name:
@@ -24,8 +27,13 @@ class EmbeddingService:
             self._is_available = True
             logger.info(f"AI Embedding Service initializing for model '{self._model_name}'...")
             if preload:
-                self._ensure_model_loaded()
-            logger.info(f"AI Embedding Service ready for model '{self._model_name}'.")
+                thread = threading.Thread(
+                    target=self._ensure_model_loaded,
+                    name="AIModelPreloadThread",
+                    daemon=True
+                )
+                thread.start()
+            logger.info(f"AI Embedding Service initialized (async preload) for model '{self._model_name}'.")
         except Exception as e:
             logger.warning(f"AI Embedding Service unavailable: {e}")
             self._is_available = False
@@ -33,12 +41,17 @@ class EmbeddingService:
     def _ensure_model_loaded(self):
         if not self._is_available:
             return False
-        if self.model is None:
+        if self.model is not None:
+            return True
+        with self._lock:
+            if self.model is not None:
+                return True
             try:
                 from sentence_transformers import SentenceTransformer
-                logger.info(f"Lazy loading AI Model '{self._model_name}' on CPU...")
+                logger.info(f"Loading AI Model '{self._model_name}' on CPU...")
                 self.model = SentenceTransformer(self._model_name, device='cpu')
                 logger.info(f"AI Model '{self._model_name}' successfully loaded into memory.")
+                return True
             except Exception as e:
                 logger.error(f"Failed to load sentence-transformers model: {e}")
                 self._is_available = False

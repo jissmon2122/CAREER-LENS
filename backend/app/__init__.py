@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from app.config import Config
 from app.db import Database
@@ -8,12 +8,51 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
-    # Enable CORS for API routes with configurable origins
+    # Enable CORS with configurable origins and credentials
     cors_origins = app.config.get('CORS_ORIGINS', ['*'])
-    if cors_origins == ['*'] or cors_origins == '*':
-        CORS(app, resources={r"/api/*": {"origins": "*"}}, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "X-Requested-With"])
-    else:
-        CORS(app, resources={r"/api/*": {"origins": cors_origins}}, supports_credentials=True, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "X-Requested-With"])
+    CORS(
+        app,
+        resources={r"/*": {"origins": "*" if cors_origins == ['*'] else cors_origins}},
+        supports_credentials=True,
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"]
+    )
+
+    @app.before_request
+    def handle_cors_preflight():
+        if request.method == "OPTIONS":
+            response = app.make_default_options_response()
+            origin = request.headers.get('Origin')
+            if origin:
+                if (
+                    cors_origins == ['*']
+                    or origin in cors_origins
+                    or origin.endswith('.vercel.app')
+                    or 'localhost' in origin
+                    or '127.0.0.1' in origin
+                ):
+                    response.headers['Access-Control-Allow-Origin'] = origin
+                    response.headers['Access-Control-Allow-Credentials'] = 'true'
+                    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+                    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+            return response
+
+    @app.after_request
+    def apply_cors_headers(response):
+        origin = request.headers.get('Origin')
+        if origin:
+            if (
+                cors_origins == ['*']
+                or origin in cors_origins
+                or origin.endswith('.vercel.app')
+                or 'localhost' in origin
+                or '127.0.0.1' in origin
+            ):
+                response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Access-Control-Allow-Credentials'] = 'true'
+                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+        return response
 
     # Initialize MongoDB connection
     Database.initialize(app)

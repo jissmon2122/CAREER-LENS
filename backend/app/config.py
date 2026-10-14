@@ -13,13 +13,25 @@ class Config:
     JWT_EXPIRATION_HOURS = int(os.getenv('JWT_EXPIRATION_HOURS', '24'))
     
     # Production CORS Configuration
+    DEFAULT_CORS_ORIGINS = [
+        'https://careerlens-iota.vercel.app',
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+    ]
     raw_frontend = (os.getenv('FRONTEND_URL') or '').strip().rstrip('/')
     FRONTEND_URL = raw_frontend
     raw_origins = (os.getenv('CORS_ORIGINS') or '').strip()
     if raw_origins and raw_origins != '*':
         CORS_ORIGINS = [o.strip().rstrip('/') for o in raw_origins.split(',') if o.strip()]
-    else:
+        for origin in DEFAULT_CORS_ORIGINS:
+            if origin not in CORS_ORIGINS:
+                CORS_ORIGINS.append(origin)
+    elif raw_origins == '*':
         CORS_ORIGINS = ['*']
+    else:
+        CORS_ORIGINS = list(DEFAULT_CORS_ORIGINS)
     if FRONTEND_URL and FRONTEND_URL not in CORS_ORIGINS and '*' not in CORS_ORIGINS:
         CORS_ORIGINS.append(FRONTEND_URL)
     
