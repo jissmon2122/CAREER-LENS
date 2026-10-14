@@ -82,7 +82,7 @@ class RoleRelevanceService:
     }
 
     @classmethod
-    def evaluate_role_relevance(cls, candidate_profile: dict, job: dict, target_role: str = None) -> dict:
+    def evaluate_role_relevance(cls, candidate_profile: dict, job: dict, target_role: str = None, is_explicit_role: bool = False) -> dict:
         """
         Evaluates role relevance between candidate profile / explicit target role & target job.
         Prioritizes user's explicitly intended target_role whenever supplied.
@@ -103,14 +103,10 @@ class RoleRelevanceService:
                 "reason": "Missing job title."
             }
 
-        # 1. Primary Priority: Explicit User Target Role OR Inferred Primary Target Role
-        primary_role = (target_role or candidate_profile.get("target_role") or candidate_profile.get("preferred_job_role") or "").strip()
-        inferred_roles = candidate_profile.get("inferred_roles", [])
-
-        # Check explicit primary role first using RoleTaxonomy
-        if primary_role:
-            eval_res = RoleTaxonomy.evaluate_role_match(primary_role, raw_title)
-            if eval_res["status"] == "STRICT_EXCLUSION":
+        # 1. Primary Priority: Explicit User Target Role Filter (when user specifically selected/typed a role in UI)
+        if is_explicit_role and target_role:
+            eval_res = RoleTaxonomy.evaluate_role_match(target_role, raw_title)
+            if eval_res["status"] == "STRICT_EXCLUSION" or eval_res.get("is_strictly_excluded"):
                 return {
                     "eligible": False,
                     "role_relevance_status": "UNRELATED",
@@ -118,39 +114,58 @@ class RoleRelevanceService:
                     "reason": eval_res["reason"]
                 }
             elif eval_res["match"]:
+                return {
+                    "eligible": True,
+                    "role_relevance_status": "DIRECT_ROLE_MATCH" if eval_res["status"] == "DIRECT_MATCH" else "RELATED_ROLE",
+                    "detected_job_role": target_role,
+                    "reason": eval_res["reason"]
+                }
+            else:
+                return {
+                    "eligible": False,
+                    "role_relevance_status": "UNRELATED",
+                    "detected_job_role": raw_title,
+                    "reason": f"Vacancy '{raw_title}' does not match explicitly selected target role '{target_role}'."
+                }
+
+        # 2. Automated Resume Recommendations Flow (or no explicit role filter)
+        primary_role = (target_role or candidate_profile.get("target_role") or candidate_profile.get("preferred_job_role") or "").strip()
+        inferred_roles = candidate_profile.get("inferred_roles", []) or candidate_profile.get("primary_roles", [])
+
+        # 2a. Strict Exclusion Check against candidate's primary and inferred roles
+        all_candidate_roles = ([primary_role] if primary_role else []) + list(inferred_roles)
+        for cand_r in all_candidate_roles:
+            eval_res = RoleTaxonomy.evaluate_role_match(cand_r, raw_title)
+            if eval_res.get("status") == "STRICT_EXCLUSION" or eval_res.get("is_strictly_excluded"):
+                return {
+                    "eligible": False,
+                    "role_relevance_status": "UNRELATED",
+                    "detected_job_role": raw_title,
+                    "reason": eval_res["reason"]
+                }
+
+        # 2b. Match against primary role
+        if primary_role:
+            eval_res = RoleTaxonomy.evaluate_role_match(primary_role, raw_title)
+            if eval_res["match"]:
                 return {
                     "eligible": True,
                     "role_relevance_status": "DIRECT_ROLE_MATCH" if eval_res["status"] == "DIRECT_MATCH" else "RELATED_ROLE",
                     "detected_job_role": primary_role,
                     "reason": eval_res["reason"]
                 }
-            else:
-                # Target role was explicitly specified and this job did NOT match the taxonomy
-                return {
-                    "eligible": False,
-                    "role_relevance_status": "UNRELATED",
-                    "detected_job_role": raw_title,
-                    "reason": f"Vacancy '{raw_title}' does not match explicitly selected target role '{primary_role}'."
-                }
 
-        # 2. Check each inferred role against RoleTaxonomy
-        cand_roles_lower = [str(r).lower().strip() for r in inferred_roles if r]
+        # 2c. Match against other inferred roles
         for role in inferred_roles:
-            eval_res = RoleTaxonomy.evaluate_role_match(role, raw_title)
-            if eval_res["status"] == "STRICT_EXCLUSION":
-                return {
-                    "eligible": False,
-                    "role_relevance_status": "UNRELATED",
-                    "detected_job_role": raw_title,
-                    "reason": eval_res["reason"]
-                }
-            elif eval_res["match"]:
-                return {
-                    "eligible": True,
-                    "role_relevance_status": "DIRECT_ROLE_MATCH" if eval_res["status"] == "DIRECT_MATCH" else "RELATED_ROLE",
-                    "detected_job_role": role,
-                    "reason": eval_res["reason"]
-                }
+            if role and role != primary_role:
+                eval_res = RoleTaxonomy.evaluate_role_match(role, raw_title)
+                if eval_res["match"]:
+                    return {
+                        "eligible": True,
+                        "role_relevance_status": "RELATED_ROLE",
+                        "detected_job_role": role,
+                        "reason": eval_res["reason"]
+                    }
 
         # 3. Detect Job Domain
         detected_job_domain = None

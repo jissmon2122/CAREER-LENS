@@ -55,7 +55,7 @@ class JobService:
         return None
 
     @classmethod
-    def find_verified_jobs(cls, target_role=None, keyword=None, location=None, country=None, is_remote=None, experience=None, limit=30):
+    def find_verified_jobs(cls, target_role=None, keyword=None, location=None, country=None, is_remote=None, experience=None, limit=30, allow_general_fallback=False):
         """
         Query verified active jobs from MongoDB Atlas jobs collection.
         Uses RoleTaxonomy allowed patterns, title regex, and skill matching.
@@ -117,9 +117,22 @@ class JobService:
 
             # If exact query with location yielded 0, relax location to find general verified vacancies for the role
             if not raw_docs and location and search_term:
-                relaxed_parts = [p for p in query_parts if "location" not in str(p)]
+                relaxed_parts = [p for p in query_parts if "location" not in str(p) and "candidate_required_location" not in str(p)]
                 relaxed_query = {"$and": relaxed_parts} if len(relaxed_parts) > 1 else (relaxed_parts[0] if relaxed_parts else {"is_live": True})
                 cursor = coll.find(relaxed_query).limit(limit)
+                raw_docs = list(cursor)
+
+            # If still 0 and search_term is present, try tokenized matching on title
+            if not raw_docs and search_term:
+                tokens = [re.escape(t.strip()) for t in search_term.split() if len(t.strip()) > 2]
+                if tokens:
+                    token_query = {"is_live": True, "title": {"$regex": "|".join(tokens), "$options": "i"}}
+                    cursor = coll.find(token_query).limit(limit)
+                    raw_docs = list(cursor)
+
+            # If still 0 and allow_general_fallback is requested, fallback to general verified live vacancies
+            if not raw_docs and (allow_general_fallback or not search_term):
+                cursor = coll.find({"is_live": True}).limit(limit)
                 raw_docs = list(cursor)
 
             results = []

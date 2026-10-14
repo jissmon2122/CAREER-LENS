@@ -80,7 +80,12 @@ def get_recommended_jobs():
                 from app.routes.resume import execute_resume_analysis_pipeline
                 a_doc = execute_resume_analysis_pipeline(r_doc, user_id)
 
-            if a_doc and isinstance(a_doc, dict) and a_doc.get("validation_status") == "VALID_RESUME" and a_doc.get("resume_score") is not None:
+            val_status = a_doc.get("validation_status")
+            has_score = a_doc.get("resume_score") is not None
+            has_skills = bool(a_doc.get("technical_skills") or a_doc.get("extracted_text"))
+            is_valid_resume = (val_status == "VALID_RESUME") or (val_status != "INVALID_RESUME" and (has_score or has_skills))
+
+            if a_doc and isinstance(a_doc, dict) and is_valid_resume:
                 analysis_doc = a_doc
                 latest_resume_doc = r_doc
                 break
@@ -264,7 +269,7 @@ def get_recommended_jobs():
             job["location_weight"] = loc_res.get("location_weight")
 
             # 6c. Role & Professional Domain Relevance Gate (Hard Filter)
-            role_rel = RoleRelevanceService.evaluate_role_relevance(candidate_profile, job, target_role=target_role)
+            role_rel = RoleRelevanceService.evaluate_role_relevance(candidate_profile, job, target_role=target_role, is_explicit_role=bool(role_param))
             job["role_relevance_status"] = role_rel.get("role_relevance_status")
             job["detected_job_role"] = role_rel.get("detected_job_role")
             job["role_relevance_reason"] = role_rel.get("reason")
@@ -301,7 +306,8 @@ def get_recommended_jobs():
                     location=location_param,
                     is_remote=is_remote,
                     experience=experience_param,
-                    limit=30
+                    limit=30,
+                    allow_general_fallback=True
                 )
                 # If target_role query returned few, also try candidate's search_keywords
                 if len(fallback_db_jobs) < 5 and search_keywords:
@@ -341,7 +347,7 @@ def get_recommended_jobs():
                     db_job["location_tiers"] = loc_res.get("location_tiers")
                     db_job["location_weight"] = loc_res.get("location_weight")
 
-                    role_rel = RoleRelevanceService.evaluate_role_relevance(candidate_profile, db_job, target_role=target_role)
+                    role_rel = RoleRelevanceService.evaluate_role_relevance(candidate_profile, db_job, target_role=target_role, is_explicit_role=bool(role_param))
                     db_job["role_relevance_status"] = role_rel.get("role_relevance_status")
                     db_job["detected_job_role"] = role_rel.get("detected_job_role")
                     db_job["role_relevance_reason"] = role_rel.get("reason")
@@ -524,10 +530,15 @@ def get_recommended_jobs():
             except ValueError:
                 pass
 
-        # 9. Categorize into 3 Relevance Buckets with Strict Boundaries
-        highly_relevant = [j for j in recommended_jobs if j.get("match_score", 0) >= 70]
-        relevant = [j for j in recommended_jobs if 50 <= j.get("match_score", 0) < 70]
-        potential = [j for j in other_opportunities if j.get("match_score", 0) < 50 or j.get("role_relevance_status") == "WEAKLY_RELATED"]
+        # 9. Categorize into 3 Relevance Buckets with Comprehensive Coverage
+        highly_relevant = [j for j in matched_job_cards if j.get("match_score", 0) >= 70 and j.get("is_primary_recommendation")]
+        if len(highly_relevant) < 3:
+            for j in other_opportunities:
+                if j.get("match_score", 0) >= 70 and j not in highly_relevant:
+                    highly_relevant.append(j)
+
+        relevant = [j for j in matched_job_cards if 50 <= j.get("match_score", 0) < 70]
+        potential = [j for j in matched_job_cards if j.get("match_score", 0) < 50 or j.get("role_relevance_status") == "WEAKLY_RELATED" or not j.get("is_primary_recommendation")]
 
         grouped_recommendations = {}
         remote_jobs = [j for j in recommended_jobs if j.get("workplace_type") == "REMOTE"]
@@ -558,7 +569,11 @@ def get_recommended_jobs():
             "qualification_rejected_count": qualification_rejected_count,
             "qualification_compatible_count": max(0, len(eligible_jobs) - qualification_rejected_count),
             "recommended_count": len(recommended_jobs),
-            "other_opportunities_count": len(other_opportunities)
+            "other_opportunities_count": len(other_opportunities),
+            "highly_relevant_count": len(highly_relevant),
+            "relevant_count": len(relevant),
+            "potential_count": len(potential),
+            "fallback_db_used": "Verified Database Store" in providers_used
         }
 
         logger.info(f"RESUME_ANALYSIS_SUCCESS: user_id={user_id}, resume_id={latest_resume_id}, domain={candidate_profile.get('professional_domain')}")
@@ -708,7 +723,12 @@ def get_job_match_analysis(job_id):
     analysis_json = ResumeAnalysisModel.to_json(analysis_doc)
 
     # MANDATORY VALIDATION GUARD FOR JOB MATCHING
-    if analysis_json.get("validation_status") != "VALID_RESUME" or analysis_json.get("resume_score") is None:
+    val_status = analysis_json.get("validation_status")
+    has_score = analysis_json.get("resume_score") is not None
+    has_skills = bool(analysis_json.get("technical_skills") or analysis_json.get("extracted_text"))
+    is_valid_resume = (val_status == "VALID_RESUME") or (val_status != "INVALID_RESUME" and (has_score or has_skills))
+
+    if not is_valid_resume:
         return jsonify({
             "success": False,
             "status": "MATCHING_BLOCKED",

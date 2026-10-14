@@ -218,9 +218,47 @@ class RoleInferenceEngine:
         explicit_alt_roles = []
 
         text_for_identity = all_candidate_text
+        software_score = domain_scores.get("SOFTWARE_IT", 0)
 
-        # Dynamic rules for unconstrained professions
-        if any(k in text_for_identity for k in ["b.ed", "m.ed", "school teacher", "high school teacher", "subject teacher", "classroom management", "pedagogy", "curriculum development", "lesson planning"]):
+        # Explicit Profession Identity Recognition (Checks title, degree, skills, raw text)
+        # Priority 1: Software Engineering, Data Science, AI & Technology
+        if any(k in text_for_identity for k in ["machine learning", "deep learning", "artificial intelligence", "data scientist", "nlp", "computer vision", "tensorflow", "pytorch", "llm", "genai", "generative ai"]):
+            explicit_identity = "Data Science & AI Specialist"
+            explicit_domain = "SOFTWARE_IT"
+            explicit_primary_roles = ["Data Scientist", "Machine Learning Engineer", "AI Engineer"]
+            explicit_related_roles = ["Data Analyst", "Applied Scientist", "Python Developer"]
+            explicit_queries = ["Data Scientist", "Machine Learning Engineer", "Python Developer"]
+        elif any(k in text_for_identity for k in ["data analyst", "data analytics", "business intelligence", "bi analyst", "power bi", "tableau", "sql analyst", "data reporter"]):
+            explicit_identity = "Data Analytics & BI Specialist"
+            explicit_domain = "SOFTWARE_IT"
+            explicit_primary_roles = ["Data Analyst", "Business Intelligence Analyst", "Analytics Specialist"]
+            explicit_related_roles = ["Data Engineer", "Reporting Analyst", "Python Developer"]
+            explicit_queries = ["Data Analyst", "BI Analyst", "Data Analytics"]
+        elif any(k in text_for_identity for k in ["devops", "cloud engineer", "aws engineer", "azure engineer", "site reliability engineer", "sre", "kubernetes", "docker", "ci/cd", "infrastructure engineer"]):
+            explicit_identity = "Cloud & DevOps Engineer"
+            explicit_domain = "SOFTWARE_IT"
+            explicit_primary_roles = ["DevOps Engineer", "Cloud Engineer", "Site Reliability Engineer"]
+            explicit_related_roles = ["Platform Engineer", "Software Engineer", "Systems Engineer"]
+            explicit_queries = ["DevOps Engineer", "Cloud Engineer"]
+        elif any(k in text_for_identity for k in ["software architect", "solution architect", "solutions architect", "system architect", "cloud architect", "enterprise architect"]):
+            explicit_identity = "Software & Systems Architect"
+            explicit_domain = "SOFTWARE_IT"
+            explicit_primary_roles = ["Software Architect", "Solutions Architect", "Senior Software Engineer"]
+            explicit_related_roles = ["Backend Architect", "Cloud Architect", "Lead Developer"]
+            explicit_queries = ["Software Architect", "Solutions Architect", "Software Engineer"]
+        elif any(k in text_for_identity for k in [
+            "software engineer", "software developer", "full stack", "fullstack", "backend developer",
+            "frontend developer", "web developer", "python developer", "java developer", "react developer",
+            "node developer", "computer science", "b.tech in computer", "b.tech cse", "b.e cse", "b.e. cse",
+            "bca", "mca", "information technology"
+        ]) or (software_score >= 3):
+            explicit_identity = "Software & Technology Specialist"
+            explicit_domain = "SOFTWARE_IT"
+            explicit_primary_roles = ["Software Engineer", "Full Stack Developer", "Backend Developer"]
+            explicit_related_roles = ["Frontend Developer", "Python Developer", "Software Developer"]
+            explicit_queries = ["Software Engineer", "Full Stack Developer", "Backend Developer"]
+        # Priority 2: Other Professional Domains (Education, Sciences, Engineering, Marketing, etc.)
+        elif any(k in text_for_identity for k in ["b.ed", "m.ed", "school teacher", "high school teacher", "subject teacher", "classroom management", "pedagogy", "curriculum development", "lesson planning"]):
             explicit_identity = "Education & Teaching Specialist"
             explicit_domain = "EDUCATION"
             explicit_primary_roles = ["School Teacher", "Subject Teacher", "Teaching Assistant"]
@@ -262,12 +300,6 @@ class RoleInferenceEngine:
             explicit_primary_roles = ["Civil Engineer", "Site Engineer", "Structural Engineer"]
             explicit_related_roles = ["Construction Project Engineer", "Quantity Surveyor"]
             explicit_queries = ["Civil Engineer", "Site Engineer", "Structural Engineer"]
-        elif any(k in text_for_identity for k in ["b.ed", "m.ed", "school teacher", "high school teacher", "subject teacher", "classroom management", "pedagogy", "curriculum development", "lesson planning"]):
-            explicit_identity = "Education & Teaching Specialist"
-            explicit_domain = "EDUCATION"
-            explicit_primary_roles = ["School Teacher", "Subject Teacher", "Teaching Assistant"]
-            explicit_related_roles = ["Education Coordinator", "Academic Counselor", "Lecturer"]
-            explicit_queries = ["Teacher", "School Teacher", "Subject Teacher"]
         elif any(k in text_for_identity for k in ["nursing", "registered nurse", "staff nurse", "clinical nurse", "b.sc nursing", "patient care"]):
             explicit_identity = "Healthcare & Nursing Specialist"
             explicit_domain = "HEALTHCARE"
@@ -292,7 +324,7 @@ class RoleInferenceEngine:
             explicit_primary_roles = ["Electrical Engineer", "Electrical Design Engineer", "Power Engineer"]
             explicit_related_roles = ["Control Systems Engineer", "PLC Automation Engineer", "Electrical Maintenance Engineer"]
             explicit_queries = ["Electrical Engineer", "Electrical Design Engineer", "Power Engineer"]
-        elif any(k in text_for_identity for k in ["digital marketing", "seo", "sem", "google ads", "social media marketing", "content marketing"]):
+        elif any(k in text_for_identity for k in ["digital marketing", "search engine marketing", "google ads", "social media marketing", "content marketing", "seo specialist", "marketing executive"]) and software_score < 3:
             explicit_identity = "Digital Marketing Specialist"
             explicit_domain = "MARKETING"
             explicit_primary_roles = ["Marketing Executive", "Digital Marketing Specialist", "SEO Specialist"]
@@ -322,7 +354,7 @@ class RoleInferenceEngine:
             explicit_primary_roles = ["Legal Counsel", "Legal Associate", "Corporate Lawyer"]
             explicit_related_roles = ["Contracts Specialist", "Legal Advisor", "Compliance Officer"]
             explicit_queries = ["Legal Counsel", "Legal Associate", "Corporate Lawyer"]
-        elif any(k in text_for_identity for k in ["architect", "architecture", "b.arch", "building design", "revit architecture", "spatial design"]):
+        elif any(k in text_for_identity for k in ["b.arch", "m.arch", "building design", "revit architecture", "spatial design", "interior architecture", "landscape architect", "architectural drafting"]) and software_score < 2:
             explicit_identity = "Architectural Designer"
             explicit_domain = "ARCHITECTURE"
             explicit_primary_roles = ["Architect", "Architectural Designer", "Building Designer"]

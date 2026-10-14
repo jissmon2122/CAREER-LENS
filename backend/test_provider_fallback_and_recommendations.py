@@ -11,6 +11,9 @@ Validates:
 import unittest
 import time
 import json
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from app import create_app
 from app.db import Database
 from app.services.job_service import JobService
