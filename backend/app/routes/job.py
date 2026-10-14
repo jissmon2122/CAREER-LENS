@@ -196,29 +196,33 @@ def get_recommended_jobs():
         query_tasks = [(kw, loc) for kw in search_keywords for loc in loc_targets]
         max_workers = min(4, len(query_tasks)) if query_tasks else 1
 
+        from concurrent.futures import TimeoutError as FuturesTimeoutError
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_fetch_provider, kw, loc): (kw, loc) for kw, loc in query_tasks}
-            for future in as_completed(futures):
-                provider_res = future.result()
-                p_status = provider_res.get('provider_status', {})
-                if p_status:
-                    provider_status.update(p_status)
-                p_used = provider_res.get('providers_used', [])
-                if p_used:
-                    providers_used.update(p_used)
+            try:
+                for future in as_completed(futures, timeout=8.0):
+                    provider_res = future.result()
+                    p_status = provider_res.get('provider_status', {})
+                    if p_status:
+                        provider_status.update(p_status)
+                    p_used = provider_res.get('providers_used', [])
+                    if p_used:
+                        providers_used.update(p_used)
 
-                if provider_res.get('success'):
-                    for item in provider_res.get('jobs', []):
-                        j_id = str(item.get('provider_job_id', ''))
-                        prov = str(item.get('provider', ''))
-                        title = str(item.get('title', '')).lower()
-                        company = str(item.get('company', '')).lower()
-                        app_url = str(item.get('application_url', '')).strip()
+                    if provider_res.get('success'):
+                        for item in provider_res.get('jobs', []):
+                            j_id = str(item.get('provider_job_id', ''))
+                            prov = str(item.get('provider', ''))
+                            title = str(item.get('title', '')).lower()
+                            company = str(item.get('company', '')).lower()
+                            app_url = str(item.get('application_url', '')).strip()
 
-                        dedup_key = (prov, j_id) if j_id else (app_url if app_url else (company, title))
-                        if dedup_key not in seen_job_keys:
-                            seen_job_keys.add(dedup_key)
-                            raw_live_jobs.append(item)
+                            dedup_key = (prov, j_id) if j_id else (app_url if app_url else (company, title))
+                            if dedup_key not in seen_job_keys:
+                                seen_job_keys.add(dedup_key)
+                                raw_live_jobs.append(item)
+            except FuturesTimeoutError:
+                logger.warning("Timed out waiting for some live provider query tasks (8s limit); proceeding with gathered results.")
 
         raw_jobs_count = len(raw_live_jobs)
 
@@ -361,7 +365,25 @@ def get_recommended_jobs():
 
         # 7. Calculate Hybrid AI Match Scores & Skill Gap Analysis for Geo & Role Eligible Jobs
         matched_job_cards = []
-        for job in eligible_jobs:
+        candidate_context = JobMatchingEngine.precompute_candidate_context(analysis_json)
+
+        from app.ai.embedding_service import embedding_service
+        if embedding_service.is_available() and eligible_jobs:
+            job_descs = [
+                (
+                    j.get("clean_description") or
+                    j.get("raw_description") or
+                    j.get("description") or
+                    j.get("job_description") or
+                    f"{j.get('title', '')} {' '.join(j.get('required_skills', []))}"
+                )[:1200]
+                for j in eligible_jobs
+            ]
+            job_embeddings = embedding_service.get_embeddings_batch(job_descs)
+        else:
+            job_embeddings = [None] * len(eligible_jobs)
+
+        for job, job_emb in zip(eligible_jobs, job_embeddings):
             req_skills = job.get("required_skills", [])
             eligibility = EligibilityService.evaluate_eligibility(candidate_skills, req_skills, job.get("title"))
             job["eligibility_status"] = eligibility["status"]
@@ -369,7 +391,13 @@ def get_recommended_jobs():
             if eligibility["status"] in ["INELIGIBLE", "MISSING_MANDATORY_REQUIREMENT"]:
                 qualification_rejected_count += 1
 
-            match_res = JobMatchingEngine.calculate_job_match(analysis_json, user_json, job)
+            match_res = JobMatchingEngine.calculate_job_match(
+                analysis_json,
+                user_json,
+                job,
+                candidate_context=candidate_context,
+                precomputed_job_embedding=job_emb
+            )
             if match_res:
                 raw_match = match_res.get("final_match_score", 0)
 

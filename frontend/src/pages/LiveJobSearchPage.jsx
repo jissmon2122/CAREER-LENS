@@ -48,12 +48,16 @@ const LiveJobSearchPage = () => {
     ...STANDARD_ROLES
   ].filter(Boolean)));
 
-  // Initial load: only fetch if liveJobsData is not already cached in context
+  // Initial load: fetch once on mount if liveJobsData is not already cached in context
+  const hasInitialFetchedRef = useRef(false);
   useEffect(() => {
-    if (!liveJobsData && !loading) {
-      fetchLiveJobs();
+    if (!hasInitialFetchedRef.current) {
+      hasInitialFetchedRef.current = true;
+      if (!liveJobsData && !loading) {
+        fetchLiveJobs();
+      }
     }
-  }, [liveJobsData, loading, fetchLiveJobs]);
+  }, [fetchLiveJobs, liveJobsData, loading]);
 
   // Debounced search when user modifies filters
   const isFirstMountRef = useRef(true);

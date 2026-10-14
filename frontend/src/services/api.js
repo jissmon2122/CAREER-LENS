@@ -9,6 +9,7 @@ const getBaseURL = () => {
 
 const api = axios.create({
   baseURL: getBaseURL(),
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -30,10 +31,20 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'))) {
+      if (!error.response) {
+        error.response = {
+          data: {
+            success: false,
+            message: 'Request timed out. Live search is taking longer than expected. Please retry or adjust filters.'
+          }
+        };
+      }
+    }
     if (error.response && error.response.status === 401) {
-      const isAuthRoute = error.config.url.includes('/auth/login') || 
-                          error.config.url.includes('/auth/register') || 
-                          error.config.url.includes('/auth/google');
+      const isAuthRoute = error.config?.url?.includes('/auth/login') || 
+                          error.config?.url?.includes('/auth/register') || 
+                          error.config?.url?.includes('/auth/google');
       if (!isAuthRoute) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
@@ -101,12 +112,12 @@ export const userAPI = {
 };
 
 export const jobAPI = {
-  getRecommendedJobs: async (params) => {
-    const response = await api.get('/jobs/recommended', { params });
+  getRecommendedJobs: async (params, options = {}) => {
+    const response = await api.get('/jobs/recommended', { params, ...options });
     return response.data;
   },
-  getLiveJobRecommendations: async (params) => {
-    const response = await api.get('/jobs/recommended', { params });
+  getLiveJobRecommendations: async (params, options = {}) => {
+    const response = await api.get('/jobs/recommended', { params, ...options });
     return response.data;
   },
   getJobMatch: async (jobId) => {

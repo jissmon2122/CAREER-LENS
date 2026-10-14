@@ -39,13 +39,14 @@ class SemanticMatcher:
         s = skill.lower().strip()
         return self.SKILL_ALIASES.get(s, s)
 
-    def categorize_skills(self, candidate_skills: list, job_skills: list) -> list:
+    def categorize_skills(self, candidate_skills: list, job_skills: list, candidate_skill_embeddings: dict = None) -> list:
         """
         Categorize job required skills against candidate skills into:
         - EXACT_MATCH
         - NORMALIZED_MATCH
         - SEMANTIC_MATCH (cos sim >= 0.70)
         - MISSING_SKILL
+        Supports precomputed candidate_skill_embeddings dict to eliminate redundant forward passes on CPU.
         """
         results = []
         cand_lower = [s.lower().strip() for s in candidate_skills]
@@ -88,12 +89,20 @@ class SemanticMatcher:
                 best_cand = None
 
                 if req_emb is not None:
-                    for cand in candidate_skills:
-                        cand_emb = embedding_service.get_embedding(cand)
-                        sim = embedding_service.cosine_similarity(req_emb, cand_emb)
-                        if sim > best_sim:
-                            best_sim = sim
-                            best_cand = cand
+                    if candidate_skill_embeddings:
+                        for cand, cand_emb in candidate_skill_embeddings.items():
+                            if cand_emb is not None:
+                                sim = embedding_service.cosine_similarity(req_emb, cand_emb)
+                                if sim > best_sim:
+                                    best_sim = sim
+                                    best_cand = cand
+                    else:
+                        for cand in candidate_skills:
+                            cand_emb = embedding_service.get_embedding(cand)
+                            sim = embedding_service.cosine_similarity(req_emb, cand_emb)
+                            if sim > best_sim:
+                                best_sim = sim
+                                best_cand = cand
 
                 if best_sim >= 0.70 and best_cand:
                     results.append({
@@ -118,9 +127,19 @@ class SemanticMatcher:
 
         return results
 
-    def compute_semantic_match(self, resume_text: str, job_description: str, candidate_skills: list, job_skills: list) -> dict:
+    def compute_semantic_match(
+        self,
+        resume_text: str,
+        job_description: str,
+        candidate_skills: list,
+        job_skills: list,
+        resume_embedding=None,
+        candidate_skill_embeddings: dict = None,
+        job_embedding=None
+    ) -> dict:
         """
         Compute overall semantic similarity score and detailed skill categorization.
+        Accepts optional precomputed resume_embedding, candidate_skill_embeddings, and job_embedding.
         """
         if not embedding_service.is_available():
             return {
@@ -130,15 +149,35 @@ class SemanticMatcher:
                 "explanation": "AI embedding service is currently offline or disabled. Falling back to deterministic analysis."
             }
 
-        # Compute full text cosine similarity
-        text_sim_score = embedding_service.compute_text_similarity(resume_text or "", job_description or "")
-        skill_cats = self.categorize_skills(candidate_skills or [], job_skills or [])
+        # Truncate text blocks to avoid tokenizer slowdown on CPU
+        clean_resume = (resume_text or "").strip()[:1200]
+        clean_job = (job_description or "").strip()[:1200]
+
+        # Calculate cosine similarity using precomputed embeddings if available
+        if resume_embedding is not None and job_embedding is not None:
+            sim = embedding_service.cosine_similarity(resume_embedding, job_embedding)
+            text_sim_score = round(sim * 100.0, 1)
+        elif resume_embedding is not None:
+            vec2 = embedding_service.get_embedding(clean_job)
+            sim = embedding_service.cosine_similarity(resume_embedding, vec2)
+            text_sim_score = round(sim * 100.0, 1)
+        elif job_embedding is not None:
+            vec1 = embedding_service.get_embedding(clean_resume)
+            sim = embedding_service.cosine_similarity(vec1, job_embedding)
+            text_sim_score = round(sim * 100.0, 1)
+        else:
+            text_sim_score = embedding_service.compute_text_similarity(clean_resume, clean_job)
+
+        skill_cats = self.categorize_skills(
+            candidate_skills or [],
+            job_skills or [],
+            candidate_skill_embeddings=candidate_skill_embeddings
+        )
 
         matched_count = sum(1 for item in skill_cats if item["status"] == "matched")
         total_count = len(job_skills) if job_skills else 1
         skill_coverage_pct = round((matched_count / total_count) * 100.0, 1)
 
-        # Generate readable explanation
         explanation = (
             f"AI Semantic Analysis completed using sentence-transformers/all-MiniLM-L6-v2. "
             f"Overall text similarity between resume and job description is {text_sim_score}%. "

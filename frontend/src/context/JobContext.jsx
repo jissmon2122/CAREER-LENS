@@ -42,10 +42,19 @@ export const JobProvider = ({ children }) => {
   const lastParamsRef = useRef('');
   const cachedUserRef = useRef(null);
   const inFlightPromiseRef = useRef(null);
+  const abortControllerRef = useRef(null);
+  const liveJobsDataRef = useRef(liveJobsData);
+
+  useEffect(() => {
+    liveJobsDataRef.current = liveJobsData;
+  }, [liveJobsData]);
 
   // Invalidate cache when user switches or logs out
   useEffect(() => {
     if (cachedUserRef.current !== currentUserId) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
       cachedUserRef.current = currentUserId;
       setLiveJobsData(null);
       setCandidateProfile(null);
@@ -76,6 +85,9 @@ export const JobProvider = ({ children }) => {
   }, []);
 
   const invalidateJobCache = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     cacheTimestampRef.current = 0;
     lastParamsRef.current = '';
     setLiveJobsData(null);
@@ -96,8 +108,9 @@ export const JobProvider = ({ children }) => {
 
     const serializedParams = JSON.stringify(activeParams);
     const now = Date.now();
+    const currentData = liveJobsDataRef.current;
     const isCacheValid = (
-      liveJobsData &&
+      currentData &&
       !forceRefresh &&
       lastParamsRef.current === serializedParams &&
       (now - cacheTimestampRef.current < CACHE_TTL_MS)
@@ -105,16 +118,23 @@ export const JobProvider = ({ children }) => {
 
     // Instant cache hit: already loaded and valid
     if (isCacheValid) {
-      return liveJobsData;
+      return currentData;
     }
 
-    // Deduplicate in-flight requests
+    // Deduplicate in-flight requests for identical parameters
     if (inFlightPromiseRef.current && lastParamsRef.current === serializedParams && !forceRefresh) {
       return inFlightPromiseRef.current;
     }
 
+    // Abort previous in-flight request if parameters changed
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     // If we already have data, show subtle refreshing indicator rather than blanking screen
-    if (liveJobsData) {
+    if (currentData) {
       setRefreshing(true);
     } else {
       setLoading(true);
@@ -128,7 +148,7 @@ export const JobProvider = ({ children }) => {
         const queryParams = { ...activeParams };
         if (forceRefresh) queryParams.refresh = 'true';
 
-        const response = await jobAPI.getLiveJobRecommendations(queryParams);
+        const response = await jobAPI.getLiveJobRecommendations(queryParams, { signal: controller.signal });
 
         if (response.success) {
           const profile = response.candidate_profile || null;
@@ -157,11 +177,15 @@ export const JobProvider = ({ children }) => {
           return null;
         }
       } catch (err) {
+        if (err?.name === 'CanceledError' || err?.name === 'AbortError' || err?.code === 'ERR_CANCELED') {
+          // Superseded by newer request - ignore cancellation cleanly
+          return null;
+        }
         console.error('Failed to fetch recommendations:', err);
         if (err.response?.data?.status === 'RESUME_REQUIRED') {
           setResumeRequired(true);
         } else {
-          setError(err.response?.data?.message || 'Unable to connect to live job service. Please check your connection and retry.');
+          setError(err.response?.data?.message || err.message || 'Unable to connect to live job service. Please check your connection and retry.');
         }
         return null;
       } finally {
@@ -173,7 +197,7 @@ export const JobProvider = ({ children }) => {
 
     inFlightPromiseRef.current = requestPromise;
     return requestPromise;
-  }, [isAuthenticated, filters, liveJobsData]);
+  }, [isAuthenticated, filters]);
 
   const refreshLiveJobs = useCallback((force = true) => {
     return fetchLiveJobs(null, force);

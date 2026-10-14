@@ -12,7 +12,50 @@ class JobMatchingEngine:
     ALGORITHM_VERSION = "1.0"
 
     @classmethod
-    def calculate_job_match(cls, resume_analysis, candidate_user, job_profile):
+    def precompute_candidate_context(cls, resume_analysis):
+        """
+        Precompute embeddings, normalized skills, and text tokens for candidate resume once.
+        Eliminates hundreds of redundant forward passes when matching against batches of 20-50 jobs.
+        """
+        if not resume_analysis:
+            return None
+
+        aliases = ExtractionService.get_skills_dictionary().get("aliases", {})
+        raw_cand_skills = resume_analysis.get("technical_skills", [])
+        cand_skills = set(aliases.get(s.lower(), s) for s in raw_cand_skills)
+
+        from app.ai.embedding_service import embedding_service
+        ai_available = embedding_service.is_available()
+
+        resume_embedding = None
+        cand_skill_embs = {}
+
+        if ai_available:
+            resume_text = (
+                resume_analysis.get("raw_text") or
+                resume_analysis.get("extracted_text") or
+                " ".join([str(s) for s in raw_cand_skills])
+            )
+            clean_resume = (resume_text or "").strip()[:1200]
+            resume_embedding = embedding_service.get_embedding(clean_resume)
+
+            if raw_cand_skills:
+                batch_res = embedding_service.get_embeddings_batch(raw_cand_skills)
+                for s, emb in zip(raw_cand_skills, batch_res):
+                    if emb is not None:
+                        cand_skill_embs[s] = emb
+
+        return {
+            "raw_cand_skills": raw_cand_skills,
+            "cand_skills": cand_skills,
+            "aliases": aliases,
+            "resume_embedding": resume_embedding,
+            "cand_skill_embs": cand_skill_embs,
+            "ai_available": ai_available
+        }
+
+    @classmethod
+    def calculate_job_match(cls, resume_analysis, candidate_user, job_profile, candidate_context=None, precomputed_job_embedding=None):
         """
         Compute deterministic match between candidate's analyzed resume & dataset job profile.
         
@@ -28,11 +71,14 @@ class JobMatchingEngine:
         if not resume_analysis or not job_profile:
             return None
 
-        aliases = ExtractionService.get_skills_dictionary().get("aliases", {})
-
-        # 1. Normalize Candidate Skills
-        raw_cand_skills = resume_analysis.get("technical_skills", [])
-        cand_skills = set(aliases.get(s.lower(), s) for s in raw_cand_skills)
+        if candidate_context:
+            aliases = candidate_context.get("aliases", {})
+            raw_cand_skills = candidate_context.get("raw_cand_skills", [])
+            cand_skills = candidate_context.get("cand_skills", set())
+        else:
+            aliases = ExtractionService.get_skills_dictionary().get("aliases", {})
+            raw_cand_skills = resume_analysis.get("technical_skills", [])
+            cand_skills = set(aliases.get(s.lower(), s) for s in raw_cand_skills)
 
         # 2. Normalize Job Required & Preferred Skills
         job_req_skills = job_profile.get("required_skills", [])
@@ -131,7 +177,7 @@ class JobMatchingEngine:
         from app.ai.embedding_service import embedding_service
         from app.ai.semantic_matcher import semantic_matcher
 
-        ai_available = embedding_service.is_available()
+        ai_available = candidate_context.get("ai_available") if candidate_context else embedding_service.is_available()
         ai_semantic_score = 0.0
         semantic_skill_categorization = []
 
@@ -150,11 +196,17 @@ class JobMatchingEngine:
                     f"{job_profile.get('title', '')} {' '.join(job_req_skills)}"
                 )
 
+                resume_emb = candidate_context.get("resume_embedding") if candidate_context else None
+                cand_skill_embs = candidate_context.get("cand_skill_embs") if candidate_context else None
+
                 ai_res = semantic_matcher.compute_semantic_match(
                     resume_text=resume_text,
                     job_description=job_desc,
                     candidate_skills=raw_cand_skills,
-                    job_skills=job_req_skills
+                    job_skills=job_req_skills,
+                    resume_embedding=resume_emb,
+                    candidate_skill_embeddings=cand_skill_embs,
+                    job_embedding=precomputed_job_embedding
                 )
                 ai_semantic_score = float(ai_res.get("ai_semantic_score", 0.0))
                 semantic_skill_categorization = ai_res.get("skill_categorization", [])
