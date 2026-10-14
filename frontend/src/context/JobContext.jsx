@@ -152,7 +152,7 @@ export const JobProvider = ({ children }) => {
           if (response.status === 'RESUME_REQUIRED') {
             setResumeRequired(true);
           } else {
-            setError(response.message || 'Live job data is currently unavailable.');
+            setError(response.message || 'No live job data available at this time.');
           }
           return null;
         }
@@ -161,7 +161,7 @@ export const JobProvider = ({ children }) => {
         if (err.response?.data?.status === 'RESUME_REQUIRED') {
           setResumeRequired(true);
         } else {
-          setError(err.response?.data?.message || 'Live job data is currently unavailable. Please try again later.');
+          setError(err.response?.data?.message || 'Unable to connect to live job service. Please check your connection and retry.');
         }
         return null;
       } finally {

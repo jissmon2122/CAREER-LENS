@@ -15,14 +15,17 @@ class EmbeddingService:
         self._model_name = "sentence-transformers/all-MiniLM-L6-v2"
         self._cache = {}
 
-    def initialize(self, model_name=None):
+    def initialize(self, model_name=None, preload=True):
         if model_name:
             self._model_name = model_name
         try:
             import numpy as np
             self.np = np
             self._is_available = True
-            logger.info(f"AI Embedding Service initialized for model '{self._model_name}' (Lazy Loading).")
+            logger.info(f"AI Embedding Service initializing for model '{self._model_name}'...")
+            if preload:
+                self._ensure_model_loaded()
+            logger.info(f"AI Embedding Service ready for model '{self._model_name}'.")
         except Exception as e:
             logger.warning(f"AI Embedding Service unavailable: {e}")
             self._is_available = False

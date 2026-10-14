@@ -34,7 +34,12 @@ class AdzunaJobProvider(BaseJobProvider):
         location = search_params.get('location', '')
         page = search_params.get('page', 1)
         limit = search_params.get('limit', self.results_per_page)
-        country = search_params.get('country', self.country).lower()
+        supported_adzuna_countries = {'at', 'au', 'be', 'br', 'ca', 'ch', 'de', 'es', 'fr', 'gb', 'in', 'it', 'mx', 'nl', 'nz', 'pl', 'sg', 'us', 'za'}
+        req_country = (search_params.get('country') or '').strip().lower()
+        default_country = (self.country or 'in').strip().lower()
+        if default_country not in supported_adzuna_countries:
+            default_country = 'in'
+        country = req_country if req_country in supported_adzuna_countries else default_country
 
         if not self.is_configured():
             logger.info("Adzuna API credentials not configured.")

@@ -199,16 +199,20 @@ class DeduplicationAndCacheEngine:
                     batch_comp_title_loc_to_id[(norm_company, norm_title, location)] = new_id
                 processed_jobs.append(cls._format_job_output(new_doc))
 
-        # Vectorized batch embedding generation
+        # Vectorized batch embedding generation (limited to top 8 items to protect CPU response time)
         if pending_embeddings and embedding_service.is_available():
-            texts_to_embed = [p[1] for p in pending_embeddings]
-            batch_embs = embedding_service.get_embeddings_batch(texts_to_embed)
-            for (target_dict, _), emb in zip(pending_embeddings, batch_embs):
-                if emb is not None:
-                    emb_list = emb.tolist() if hasattr(emb, "tolist") else emb
-                    target_dict["job_embedding"] = emb_list
-                    target_dict["embedding_model"] = Config.AI_MODEL_NAME
-                    target_dict["embedding_version"] = 1
+            try:
+                to_embed = pending_embeddings[:8]
+                texts_to_embed = [p[1] for p in to_embed]
+                batch_embs = embedding_service.get_embeddings_batch(texts_to_embed)
+                for (target_dict, _), emb in zip(to_embed, batch_embs):
+                    if emb is not None:
+                        emb_list = emb.tolist() if hasattr(emb, "tolist") else emb
+                        target_dict["job_embedding"] = emb_list
+                        target_dict["embedding_model"] = Config.AI_MODEL_NAME
+                        target_dict["embedding_version"] = 1
+            except Exception as emb_e:
+                logger.warning(f"Embedding batch generation warning: {emb_e}")
 
         # Execute single round-trip MongoDB bulk_write
         if bulk_ops and jobs_collection is not None:

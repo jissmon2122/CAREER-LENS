@@ -135,35 +135,41 @@ class JobMatchingEngine:
         ai_semantic_score = 0.0
         semantic_skill_categorization = []
 
-        if ai_available:
-            resume_text = (
-                resume_analysis.get("raw_text") or
-                resume_analysis.get("extracted_text") or
-                " ".join([str(s) for s in raw_cand_skills])
-            )
-            job_desc = (
-                job_profile.get("clean_description") or
-                job_profile.get("raw_description") or
-                job_profile.get("description") or
-                job_profile.get("job_description") or
-                f"{job_profile.get('title', '')} {' '.join(job_req_skills)}"
-            )
+        if ai_available and not is_strictly_excluded:
+            try:
+                resume_text = (
+                    resume_analysis.get("raw_text") or
+                    resume_analysis.get("extracted_text") or
+                    " ".join([str(s) for s in raw_cand_skills])
+                )
+                job_desc = (
+                    job_profile.get("clean_description") or
+                    job_profile.get("raw_description") or
+                    job_profile.get("description") or
+                    job_profile.get("job_description") or
+                    f"{job_profile.get('title', '')} {' '.join(job_req_skills)}"
+                )
 
-            ai_res = semantic_matcher.compute_semantic_match(
-                resume_text=resume_text,
-                job_description=job_desc,
-                candidate_skills=raw_cand_skills,
-                job_skills=job_req_skills
-            )
-            ai_semantic_score = float(ai_res.get("ai_semantic_score", 0.0))
-            semantic_skill_categorization = ai_res.get("skill_categorization", [])
+                ai_res = semantic_matcher.compute_semantic_match(
+                    resume_text=resume_text,
+                    job_description=job_desc,
+                    candidate_skills=raw_cand_skills,
+                    job_skills=job_req_skills
+                )
+                ai_semantic_score = float(ai_res.get("ai_semantic_score", 0.0))
+                semantic_skill_categorization = ai_res.get("skill_categorization", [])
 
-            weighted_det = round(0.60 * deterministic_score, 2)
-            weighted_ai = round(0.40 * ai_semantic_score, 2)
-            # Combined Match Formula: 60% Existing Deterministic + 40% AI Semantic Match
-            final_match_score = round(weighted_det + weighted_ai, 1)
+                weighted_det = round(0.60 * deterministic_score, 2)
+                weighted_ai = round(0.40 * ai_semantic_score, 2)
+                # Combined Match Formula: 60% Existing Deterministic + 40% AI Semantic Match
+                final_match_score = round(weighted_det + weighted_ai, 1)
+            except Exception as ai_e:
+                logger.warning(f"AI semantic match computation notice: {ai_e}. Using deterministic score.")
+                ai_semantic_score = float(deterministic_score)
+                weighted_det = round(0.60 * deterministic_score, 2)
+                weighted_ai = round(0.40 * ai_semantic_score, 2)
+                final_match_score = float(deterministic_score)
         else:
-            logger.warning("AI Embedding Service unavailable. Using deterministic score.")
             ai_semantic_score = float(deterministic_score)
             weighted_det = round(0.60 * deterministic_score, 2)
             weighted_ai = round(0.40 * ai_semantic_score, 2)
