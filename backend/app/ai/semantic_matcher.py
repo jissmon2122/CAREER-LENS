@@ -142,12 +142,12 @@ class SemanticMatcher:
         Compute overall semantic similarity score and detailed skill categorization.
         Accepts optional precomputed resume_embedding, candidate_skill_embeddings, and job_embedding.
         """
-        if not embedding_service.is_available():
+        if not getattr(embedding_service, 'is_ready', lambda: False)():
             return {
                 "ai_available": False,
                 "ai_semantic_score": 0.0,
                 "skill_categorization": self.categorize_skills(candidate_skills, job_skills, compute_semantic=False),
-                "explanation": "AI embedding service is currently offline or disabled. Falling back to deterministic analysis."
+                "explanation": "AI embedding service is currently warming up or offline. Falling back to deterministic analysis."
             }
 
         # Truncate text blocks to avoid tokenizer slowdown on CPU

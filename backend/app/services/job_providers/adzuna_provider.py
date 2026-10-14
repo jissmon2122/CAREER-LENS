@@ -70,7 +70,7 @@ class AdzunaJobProvider(BaseJobProvider):
         }
 
         try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            response = requests.get(url, params=params, timeout=self.timeout)
             if response.status_code == 200:
                 data = response.json()
                 results = data.get('results', [])

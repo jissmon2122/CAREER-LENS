@@ -37,7 +37,7 @@ class ArbeitnowJobProvider(BaseJobProvider):
 
         try:
             url = f"{self.base_url}?page={page}"
-            response = self.session.get(url, timeout=self.timeout)
+            response = requests.get(url, timeout=self.timeout)
             if response.status_code == 200:
                 data = response.json()
                 raw_jobs = data.get('data', [])

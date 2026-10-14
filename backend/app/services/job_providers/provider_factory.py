@@ -67,17 +67,18 @@ class MultiSourceJobProvider(BaseJobProvider):
                 logger.error(f"Provider '{name}' failed: {e}")
                 return name, {"success": False, "error": "PROVIDER_ERROR", "jobs": []}
 
-        # Run configured providers in parallel using ThreadPoolExecutor with strict 4.5s timeout
+        # Run configured providers in parallel using ThreadPoolExecutor with strict 3.5s timeout
         import time
         from concurrent.futures import TimeoutError as FuturesTimeoutError
         max_workers = min(5, len(providers_to_query)) if providers_to_query else 1
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             future_to_prov = {
                 executor.submit(_fetch_single_provider, name, inst): name 
                 for name, inst in providers_to_query
             }
             try:
-                for future in as_completed(future_to_prov, timeout=4.5):
+                for future in as_completed(future_to_prov, timeout=3.5):
                     name = future_to_prov[future]
                     try:
                         prov_name, res = future.result()
@@ -93,10 +94,12 @@ class MultiSourceJobProvider(BaseJobProvider):
                         logger.error(f"Error reading future for provider '{name}': {e}")
                         provider_status[name] = "PROVIDER_ERROR"
             except FuturesTimeoutError:
-                logger.warning("Timed out waiting for some live job providers (4.5s limit); proceeding with partial results.")
+                logger.warning("Timed out waiting for some live job providers (3.5s limit); proceeding with partial results.")
                 for future, name in future_to_prov.items():
                     if name not in provider_status:
                         provider_status[name] = "PROVIDER_TIMEOUT"
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         # Mark unconfigured providers
         all_possible = ["adzuna", "remotive", "arbeitnow", "jooble", "indianapi"]

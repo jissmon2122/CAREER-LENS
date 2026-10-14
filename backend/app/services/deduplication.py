@@ -72,8 +72,10 @@ class DeduplicationAndCacheEngine:
             clean_desc = JobDescriptionCleaner.clean(raw_desc)
 
             # 2. Extract & Normalize Skills
-            extracted_skills = ExtractionService.extract_skills(clean_desc)
-            req_skills = raw_job.get("required_skills") or extracted_skills.get("technical_skills", [])
+            req_skills = raw_job.get("required_skills")
+            if not req_skills:
+                extracted_skills = ExtractionService.extract_skills(clean_desc[:1500])
+                req_skills = extracted_skills.get("technical_skills", [])
             pref_skills = raw_job.get("preferred_skills") or []
 
             # 3. Normalized Title & Company
@@ -199,8 +201,8 @@ class DeduplicationAndCacheEngine:
                     batch_comp_title_loc_to_id[(norm_company, norm_title, location)] = new_id
                 processed_jobs.append(cls._format_job_output(new_doc))
 
-        # Vectorized batch embedding generation (limited to top 8 items to protect CPU response time)
-        if pending_embeddings and embedding_service.is_available():
+        # Vectorized batch embedding generation (only if model is already loaded and ready in memory)
+        if pending_embeddings and getattr(embedding_service, 'is_ready', lambda: False)():
             try:
                 to_embed = pending_embeddings[:8]
                 texts_to_embed = [p[1] for p in to_embed]
@@ -212,7 +214,7 @@ class DeduplicationAndCacheEngine:
                         target_dict["embedding_model"] = Config.AI_MODEL_NAME
                         target_dict["embedding_version"] = 1
             except Exception as emb_e:
-                logger.warning(f"Embedding batch generation warning: {emb_e}")
+                logger.warning(f"Embedding batch generation notice: {emb_e}")
 
         # Execute single round-trip MongoDB bulk_write
         if bulk_ops and jobs_collection is not None:

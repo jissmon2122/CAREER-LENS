@@ -177,6 +177,8 @@ def get_recommended_jobs():
         loc_targets = [location_param] if location_param else [""]
 
         # 4. Multi-Source Live Provider Execution (Adzuna + Jooble + IndianAPI) - Parallelized via ThreadPoolExecutor
+        t_prov_start = time.time()
+        logger.info(f"[RECOMMEND START] user_id={user_id}, target_role='{target_role}', location='{resolved_location}', search_keywords={search_keywords}")
         provider = ProviderFactory.get_provider()
         raw_live_jobs = []
         seen_job_keys = set()
@@ -193,19 +195,23 @@ def get_recommended_jobs():
                 'limit': 50
             }
             try:
-                return provider.search_jobs(search_params)
+                t0_p = time.time()
+                res = provider.search_jobs(search_params)
+                logger.info(f"[PROVIDER TASK] kw='{kw}', loc='{loc_target}' completed in {round(time.time() - t0_p, 3)}s: success={res.get('success')}, jobs={len(res.get('jobs', []))}")
+                return res
             except Exception as e:
-                logger.error(f"Error querying live provider for keyword '{kw}' at '{loc_target}': {e}")
+                logger.error(f"[PROVIDER TASK ERROR] kw='{kw}', loc='{loc_target}': {e}")
                 return {"success": False, "jobs": [], "error": str(e)}
 
         query_tasks = [(kw, loc) for kw in search_keywords for loc in loc_targets]
         max_workers = min(4, len(query_tasks)) if query_tasks else 1
 
         from concurrent.futures import TimeoutError as FuturesTimeoutError
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             futures = {executor.submit(_fetch_provider, kw, loc): (kw, loc) for kw, loc in query_tasks}
             try:
-                for future in as_completed(futures, timeout=5.0):
+                for future in as_completed(futures, timeout=4.0):
                     provider_res = future.result()
                     p_status = provider_res.get('provider_status', {})
                     if p_status:
@@ -227,13 +233,18 @@ def get_recommended_jobs():
                                 seen_job_keys.add(dedup_key)
                                 raw_live_jobs.append(item)
             except FuturesTimeoutError:
-                logger.warning("Timed out waiting for some live provider query tasks (5s limit); proceeding with gathered results.")
+                logger.warning("Timed out waiting for some live provider query tasks (4.0s limit); proceeding with gathered results.")
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         raw_jobs_count = len(raw_live_jobs)
+        logger.info(f"[RECOMMEND PROVIDERS] Phase completed in {round(time.time() - t_prov_start, 3)}s, raw_jobs={raw_jobs_count}")
 
         # 5. Deduplicate and cache live jobs
+        t_dedup_start = time.time()
         normalized_jobs = DeduplicationAndCacheEngine.process_and_cache_jobs(raw_live_jobs)
         duplicates_removed_count = max(0, raw_jobs_count - len(normalized_jobs))
+        logger.info(f"[RECOMMEND DEDUP] Phase completed in {round(time.time() - t_dedup_start, 3)}s, normalized={len(normalized_jobs)}, dupes_removed={duplicates_removed_count}")
 
         # 6. Apply Geographic & Role Relevance Eligibility Filtering Stage (BEFORE Match Scoring/Ranking)
         from app.services.role_relevance_service import RoleRelevanceService
@@ -374,7 +385,11 @@ def get_recommended_jobs():
         candidate_context = JobMatchingEngine.precompute_candidate_context(analysis_json)
 
         from app.ai.embedding_service import embedding_service
-        if embedding_service.is_available() and eligible_jobs:
+        ai_is_ready = getattr(embedding_service, 'is_ready', lambda: False)()
+        t_match_start = time.time()
+        logger.info(f"[RECOMMEND MATCHING] Starting score calculation for {len(eligible_jobs)} eligible jobs (ai_ready={ai_is_ready})")
+
+        if ai_is_ready and eligible_jobs:
             job_descs = [
                 (
                     j.get("clean_description") or
@@ -771,7 +786,8 @@ def search_live_jobs():
     Legacy API search endpoint.
     """
     try:
-        keyword = request.args.get('keyword', '').strip()
+        t_search_start = time.time()
+        keyword = (request.args.get('keyword') or request.args.get('query') or request.args.get('q') or '').strip()
         location = request.args.get('location', '').strip()
         country = request.args.get('country', '').strip()
         remote_param = request.args.get('remote', '').lower()
@@ -789,6 +805,8 @@ def search_live_jobs():
         except ValueError:
             limit = 20
 
+        logger.info(f"[SEARCH START] keyword='{keyword}', location='{location}', page={page}, limit={limit}")
+
         search_params = {
             'keyword': keyword,
             'location': location,
@@ -800,11 +818,16 @@ def search_live_jobs():
             'limit': limit
         }
 
+        t_prov_start = time.time()
         provider = ProviderFactory.get_provider()
         provider_res = provider.search_jobs(search_params)
 
         raw_jobs = provider_res.get('jobs', []) if provider_res.get('success') else []
+        logger.info(f"[SEARCH PROVIDERS] Completed in {round(time.time() - t_prov_start, 3)}s, raw_jobs={len(raw_jobs)}")
+
+        t_dedup_start = time.time()
         normalized_jobs = DeduplicationAndCacheEngine.process_and_cache_jobs(raw_jobs) if raw_jobs else []
+        logger.info(f"[SEARCH DEDUP] Completed in {round(time.time() - t_dedup_start, 3)}s, normalized_jobs={len(normalized_jobs)}")
 
         if keyword and normalized_jobs:
             from app.services.role_taxonomy import RoleTaxonomy
@@ -820,7 +843,8 @@ def search_live_jobs():
 
         # Fallback to verified MongoDB Atlas jobs if live providers returned 0 matching jobs or failed
         if not normalized_jobs:
-            logger.info(f"Live search returned 0 items for '{keyword}', falling back to verified MongoDB vacancies.")
+            t_fb_start = time.time()
+            logger.info(f"[SEARCH FALLBACK] Live search returned 0 items for '{keyword}', querying verified MongoDB vacancies.")
             db_jobs = JobService.find_verified_jobs(
                 keyword=keyword,
                 target_role=keyword,
@@ -829,11 +853,14 @@ def search_live_jobs():
                 experience=experience,
                 limit=limit
             )
+            logger.info(f"[SEARCH FALLBACK] MongoDB query completed in {round(time.time() - t_fb_start, 3)}s, found={len(db_jobs)}")
             if db_jobs:
                 normalized_jobs = db_jobs
                 source_name = "MongoDB Verified Vacancy Store"
 
         now_iso = datetime.now(timezone.utc).isoformat()
+        total_time = round(time.time() - t_search_start, 3)
+        logger.info(f"[SEARCH TOTAL] Completed in {total_time}s, returning {len(normalized_jobs)} jobs")
 
         return jsonify({
             "success": True,

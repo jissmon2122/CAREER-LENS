@@ -14,51 +14,71 @@ class EmbeddingService:
         self.model = None
         self.np = None
         self._is_available = False
+        self._is_loading = False
         self._model_name = "sentence-transformers/all-MiniLM-L6-v2"
         self._cache = {}
         self._lock = threading.Lock()
 
-    def initialize(self, model_name=None, preload=False):
+    def initialize(self, model_name=None, preload=True):
         if model_name:
             self._model_name = model_name
         try:
             import numpy as np
             self.np = np
             self._is_available = True
-            logger.info(f"AI Embedding Service ready (lazy on-demand loading) for model '{self._model_name}'.")
+            logger.info(f"AI Embedding Service initialized for model '{self._model_name}'.")
             if preload:
-                thread = threading.Thread(
-                    target=self._ensure_model_loaded,
-                    name="AIModelPreloadThread",
-                    daemon=True
-                )
-                thread.start()
+                self._ensure_model_loaded(blocking=False)
         except Exception as e:
             logger.warning(f"AI Embedding Service unavailable: {e}")
             self._is_available = False
 
-    def _ensure_model_loaded(self):
+    def _ensure_model_loaded(self, blocking=False):
         if not self._is_available:
             return False
         if self.model is not None:
             return True
+
+        if not blocking:
+            with self._lock:
+                if self.model is not None:
+                    return True
+                if not self._is_loading:
+                    self._is_loading = True
+                    thread = threading.Thread(
+                        target=self._load_model_worker,
+                        name="AIModelLoadThread",
+                        daemon=True
+                    )
+                    thread.start()
+            return False
+
+        # If blocking requested (e.g. in offline tests or explicitly)
+        return self._load_model_worker()
+
+    def _load_model_worker(self):
         with self._lock:
             if self.model is not None:
+                self._is_loading = False
                 return True
             try:
                 from sentence_transformers import SentenceTransformer
                 logger.info(f"Loading AI Model '{self._model_name}' on CPU...")
                 self.model = SentenceTransformer(self._model_name, device='cpu')
                 logger.info(f"AI Model '{self._model_name}' successfully loaded into memory.")
+                self._is_loading = False
                 return True
             except Exception as e:
                 logger.error(f"Failed to load sentence-transformers model: {e}")
-                self._is_available = False
+                self._is_loading = False
                 return False
-        return True
 
     def is_available(self) -> bool:
         return self._is_available
+
+    def is_ready(self) -> bool:
+        """Check if AI model is in-memory and ready for immediate vector inference without blocking."""
+        return bool(self._is_available and self.model is not None)
 
     def get_embedding(self, text: str):
         """
@@ -73,8 +93,11 @@ class EmbeddingService:
         if clean_text in self._cache:
             return self._cache[clean_text]
 
-        if not self._ensure_model_loaded():
+        if not self.is_ready():
+            # Trigger background load without stalling current request
+            self._ensure_model_loaded(blocking=False)
             return None
+
         try:
             embedding = self.model.encode(clean_text, convert_to_numpy=True, normalize_embeddings=True)
             if len(self._cache) > 10000:
@@ -92,7 +115,8 @@ class EmbeddingService:
         """
         if not self.is_available() or not texts:
             return [None] * len(texts)
-        if not self._ensure_model_loaded():
+        if not self.is_ready():
+            self._ensure_model_loaded(blocking=False)
             return [None] * len(texts)
 
         results = [None] * len(texts)

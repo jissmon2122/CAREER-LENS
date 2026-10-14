@@ -25,7 +25,7 @@ class JobMatchingEngine:
         cand_skills = set(aliases.get(s.lower(), s) for s in raw_cand_skills)
 
         from app.ai.embedding_service import embedding_service
-        ai_available = embedding_service.is_available()
+        ai_available = getattr(embedding_service, 'is_ready', lambda: False)()
 
         resume_embedding = None
         cand_skill_embs = {}
@@ -177,7 +177,7 @@ class JobMatchingEngine:
         from app.ai.embedding_service import embedding_service
         from app.ai.semantic_matcher import semantic_matcher
 
-        ai_available = candidate_context.get("ai_available") if candidate_context else embedding_service.is_available()
+        ai_available = candidate_context.get("ai_available") if candidate_context else getattr(embedding_service, 'is_ready', lambda: False)()
         ai_semantic_score = 0.0
         semantic_skill_categorization = []
 

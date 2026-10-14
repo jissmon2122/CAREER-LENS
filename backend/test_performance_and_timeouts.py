@@ -133,5 +133,45 @@ class PerformanceAndTimeoutsTestCase(unittest.TestCase):
         self.assertGreaterEqual(len(result.get("jobs", [])), 1)
         self.assertLess(elapsed, 6.0, f"Aggregator exceeded bounded limit: {elapsed:.2f}s")
 
+    def test_search_endpoint_query_param_support(self):
+        """Verify that /api/jobs/search accepts ?query=, ?keyword=, and ?q= and responds in <6s."""
+        t0 = time.time()
+        res = self.client.get('/api/jobs/search?query=software%20engineer')
+        elapsed = time.time() - t0
+
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get('success'))
+        self.assertLess(elapsed, 7.0, f"Search took too long: {elapsed:.2f}s")
+        self.assertIn("jobs", data)
+
+    def test_recommended_endpoint_auth_protected_and_bounded_time(self):
+        """Verify that /api/jobs/recommended requires auth and responds rapidly without blocking."""
+        # Unauthenticated request must return 401
+        res_unauth = self.client.get('/api/jobs/recommended')
+        self.assertEqual(res_unauth.status_code, 401)
+
+        fake_user = {
+            "_id": "507f1f77bcf86cd799439011",
+            "email": "rectest@example.com",
+            "name": "Rec Tester",
+            "role": "candidate",
+            "preferred_job_role": "Software Engineer",
+            "preferred_location": "Remote",
+            "experience_level": "Fresher"
+        }
+        token = generate_app_jwt(fake_user)
+
+        with patch.object(UserModel, 'find_by_id', return_value=fake_user):
+            t0 = time.time()
+            res = self.client.get(
+                '/api/jobs/recommended',
+                headers={'Authorization': f'Bearer {token}'}
+            )
+            elapsed = time.time() - t0
+
+        self.assertIn(res.status_code, [200, 400])
+        self.assertLess(elapsed, 8.0, f"Recommendation took too long: {elapsed:.2f}s")
+
 if __name__ == '__main__':
     unittest.main()

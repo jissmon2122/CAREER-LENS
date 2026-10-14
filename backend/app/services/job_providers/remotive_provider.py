@@ -42,7 +42,7 @@ class RemotiveJobProvider(BaseJobProvider):
                 params['search'] = first_token
 
         try:
-            response = self.session.get(self.base_url, params=params, timeout=self.timeout)
+            response = requests.get(self.base_url, params=params, timeout=self.timeout)
             if response.status_code == 200:
                 data = response.json()
                 raw_jobs = data.get('jobs', [])
