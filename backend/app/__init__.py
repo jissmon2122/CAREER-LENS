@@ -9,13 +9,14 @@ def create_app():
     app.config.from_object(Config)
 
     # Enable CORS with configurable origins and credentials
-    cors_origins = app.config.get('CORS_ORIGINS', ['*'])
+    cors_origins = app.config.get('CORS_ORIGINS') or Config.DEFAULT_CORS_ORIGINS
     CORS(
         app,
-        resources={r"/*": {"origins": "*" if cors_origins == ['*'] else cors_origins}},
+        resources={r"/*": {"origins": cors_origins}},
         supports_credentials=True,
-        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-        allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"]
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+        max_age=86400
     )
 
     @app.before_request
@@ -24,34 +25,38 @@ def create_app():
             response = app.make_default_options_response()
             origin = request.headers.get('Origin')
             if origin:
-                if (
-                    cors_origins == ['*']
-                    or origin in cors_origins
-                    or origin.endswith('.vercel.app')
-                    or 'localhost' in origin
-                    or '127.0.0.1' in origin
-                ):
+                clean_origin = origin.strip().rstrip('/')
+                is_allowed = (
+                    clean_origin in cors_origins
+                    or clean_origin.endswith('.vercel.app')
+                    or 'localhost' in clean_origin
+                    or '127.0.0.1' in clean_origin
+                )
+                if is_allowed:
                     response.headers['Access-Control-Allow-Origin'] = origin
                     response.headers['Access-Control-Allow-Credentials'] = 'true'
-                    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+                    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
                     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+                    response.headers['Access-Control-Max-Age'] = '86400'
             return response
 
     @app.after_request
     def apply_cors_headers(response):
         origin = request.headers.get('Origin')
         if origin:
-            if (
-                cors_origins == ['*']
-                or origin in cors_origins
-                or origin.endswith('.vercel.app')
-                or 'localhost' in origin
-                or '127.0.0.1' in origin
-            ):
+            clean_origin = origin.strip().rstrip('/')
+            is_allowed = (
+                clean_origin in cors_origins
+                or clean_origin.endswith('.vercel.app')
+                or 'localhost' in clean_origin
+                or '127.0.0.1' in clean_origin
+            )
+            if is_allowed:
                 response.headers['Access-Control-Allow-Origin'] = origin
                 response.headers['Access-Control-Allow-Credentials'] = 'true'
-                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
                 response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+                response.headers['Access-Control-Max-Age'] = '86400'
         return response
 
     # Initialize MongoDB connection

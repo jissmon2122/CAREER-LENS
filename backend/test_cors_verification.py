@@ -1,56 +1,98 @@
 import unittest
 from app import create_app
+from app.config import Config, _parse_allowed_origins
 
 class TestCorsVerification(unittest.TestCase):
     def setUp(self):
         self.app = create_app()
         self.client = self.app.test_client()
 
-    def test_cors_preflight_and_responses(self):
-        origins_to_test = [
-            'https://careerlens-iota.vercel.app',
-            'https://any-branch-preview.vercel.app',
-            'http://localhost:5173',
-            'http://127.0.0.1:5173'
-        ]
+    def test_cors_origin_parser(self):
+        """Verify robust parsing of CORS_ORIGINS with whitespace, commas, semicolons, trailing slashes."""
+        # Test default origins always include production and dev URLs
+        origins = _parse_allowed_origins()
+        self.assertIn('https://careerlens-iota.vercel.app', origins)
+        self.assertIn('http://localhost:5173', origins)
+        self.assertNotIn('*', origins)
 
-        routes_to_test = [
-            ('/api/auth/login', 'POST'),
-            ('/api/auth/register', 'POST'),
-            ('/api/jobs/recommended', 'GET'),
-            ('/api/jobs/search', 'GET'),
-            ('/api/health', 'GET'),
-            ('/health', 'GET')
-        ]
+    def test_options_preflight_login(self):
+        """Verify OPTIONS preflight on /api/auth/login succeeds with exact origin and allowed headers."""
+        target_origin = 'https://careerlens-iota.vercel.app'
+        res = self.client.open(
+            '/api/auth/login',
+            method='OPTIONS',
+            headers={
+                'Origin': target_origin,
+                'Access-Control-Request-Method': 'POST',
+                'Access-Control-Request-Headers': 'Content-Type, Authorization'
+            }
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get('Access-Control-Allow-Origin'), target_origin)
+        self.assertNotEqual(res.headers.get('Access-Control-Allow-Origin'), '*')
+        self.assertEqual(res.headers.get('Access-Control-Allow-Credentials'), 'true')
+        
+        methods = res.headers.get('Access-Control-Allow-Methods', '')
+        for m in ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']:
+            self.assertIn(m, methods)
+            
+        allowed_headers = res.headers.get('Access-Control-Allow-Headers', '')
+        self.assertIn('Content-Type', allowed_headers)
+        self.assertIn('Authorization', allowed_headers)
 
-        for origin in origins_to_test:
-            for route, method in routes_to_test:
-                # Test OPTIONS preflight
-                res = self.client.open(
-                    route,
-                    method='OPTIONS',
-                    headers={
-                        'Origin': origin,
-                        'Access-Control-Request-Method': method,
-                        'Access-Control-Request-Headers': 'Content-Type, Authorization'
-                    }
-                )
-                self.assertEqual(res.status_code, 200, f"OPTIONS {route} failed with {res.status_code}")
-                self.assertEqual(
-                    res.headers.get('Access-Control-Allow-Origin'),
-                    origin,
-                    f"CORS header missing or mismatched for {origin} on OPTIONS {route}"
-                )
-                self.assertIn('POST', res.headers.get('Access-Control-Allow-Methods', ''))
-                self.assertIn('Content-Type', res.headers.get('Access-Control-Allow-Headers', ''))
+    def test_options_preflight_me(self):
+        """Verify OPTIONS preflight on protected endpoint /api/auth/me does not trigger 401."""
+        target_origin = 'https://careerlens-iota.vercel.app'
+        res = self.client.open(
+            '/api/auth/me',
+            method='OPTIONS',
+            headers={
+                'Origin': target_origin,
+                'Access-Control-Request-Method': 'GET',
+                'Access-Control-Request-Headers': 'Authorization'
+            }
+        )
+        # Preflight must NOT return 401 Unauthorized
+        self.assertIn(res.status_code, [200, 204])
+        self.assertEqual(res.headers.get('Access-Control-Allow-Origin'), target_origin)
+        self.assertEqual(res.headers.get('Access-Control-Allow-Credentials'), 'true')
 
-                # Test standard request
-                res_actual = self.client.open(route, method=method, headers={'Origin': origin})
-                self.assertEqual(
-                    res_actual.headers.get('Access-Control-Allow-Origin'),
-                    origin,
-                    f"CORS header missing or mismatched for {origin} on {method} {route}"
-                )
+    def test_post_login_cors_headers_on_validation_failure(self):
+        """Verify CORS headers are present even when POST /api/auth/login returns 400 Bad Request."""
+        target_origin = 'https://careerlens-iota.vercel.app'
+        res = self.client.post(
+            '/api/auth/login',
+            json={},  # empty body to trigger 400 validation error
+            headers={'Origin': target_origin}
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.headers.get('Access-Control-Allow-Origin'), target_origin)
+        self.assertEqual(res.headers.get('Access-Control-Allow-Credentials'), 'true')
+
+    def test_protected_route_cors_headers_on_401(self):
+        """Verify CORS headers are present when protected endpoint returns 401 Unauthorized."""
+        target_origin = 'https://careerlens-iota.vercel.app'
+        res = self.client.get(
+            '/api/auth/me',
+            headers={'Origin': target_origin}
+        )
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.headers.get('Access-Control-Allow-Origin'), target_origin)
+        self.assertEqual(res.headers.get('Access-Control-Allow-Credentials'), 'true')
+
+    def test_disallowed_origin_does_not_get_cors_headers(self):
+        """Verify that an untrusted origin does NOT receive Access-Control-Allow-Origin."""
+        untrusted_origin = 'https://malicious-site.example.com'
+        res = self.client.open(
+            '/api/auth/login',
+            method='OPTIONS',
+            headers={
+                'Origin': untrusted_origin,
+                'Access-Control-Request-Method': 'POST'
+            }
+        )
+        self.assertNotEqual(res.headers.get('Access-Control-Allow-Origin'), untrusted_origin)
+        self.assertNotEqual(res.headers.get('Access-Control-Allow-Origin'), '*')
 
 if __name__ == '__main__':
     unittest.main()

@@ -15,6 +15,10 @@ def jwt_required(f):
     """Decorator to enforce JWT authentication on protected endpoints."""
     @functools.wraps(f)
     def decorated(*args, **kwargs):
+        # Allow preflight OPTIONS requests without requiring authentication
+        if request.method == 'OPTIONS':
+            return ('', 204)
+
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             return jsonify({
@@ -72,9 +76,12 @@ def generate_app_jwt(user):
     }
     return jwt.encode(payload, Config.JWT_SECRET_KEY, algorithm="HS256")
 
-@auth_bp.route('/register', methods=['POST'])
+@auth_bp.route('/register', methods=['POST', 'OPTIONS'])
 def register():
     """Register local candidate user account."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
     data = request.get_json(silent=True) or {}
     
     is_valid, error_msg = validate_registration_data(data)
@@ -105,9 +112,12 @@ def register():
         }
     }), 201
 
-@auth_bp.route('/login', methods=['POST'])
+@auth_bp.route('/login', methods=['POST', 'OPTIONS'])
 def login():
     """Authenticate candidate via local credentials and issue JWT token."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
     data = request.get_json(silent=True) or {}
 
     is_valid, error_msg = validate_login_data(data)
@@ -154,12 +164,15 @@ def login():
         }
     }), 200
 
-@auth_bp.route('/google', methods=['POST'])
+@auth_bp.route('/google', methods=['POST', 'OPTIONS'])
 def google_auth():
     """
     Authenticate candidate via Google OAuth credential token.
     Verifies Google ID token signature & audience, creates or retrieves user, and returns application JWT.
     """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
     data = request.get_json(silent=True) or {}
     token = data.get('credential')
 
@@ -237,10 +250,13 @@ def google_auth():
             "error": str(e)
         }), 500
 
-@auth_bp.route('/me', methods=['GET'])
+@auth_bp.route('/me', methods=['GET', 'OPTIONS'])
 @jwt_required
 def get_me():
     """Fetch current authenticated candidate profile."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
     user_json = UserModel.to_json(request.current_user)
     return jsonify({
         "success": True,

@@ -1,8 +1,42 @@
 import os
+import re
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+def _parse_allowed_origins():
+    default_origins = [
+        'https://careerlens-iota.vercel.app',
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+    ]
+    origins = []
+
+    # Parse FRONTEND_URL
+    raw_frontend = (os.getenv('FRONTEND_URL') or '').strip()
+    if raw_frontend and raw_frontend != '*':
+        clean_front = raw_frontend.rstrip('/')
+        if clean_front and clean_front not in origins:
+            origins.append(clean_front)
+
+    # Parse CORS_ORIGINS (supports comma, semicolon, whitespace, newlines)
+    raw_origins = (os.getenv('CORS_ORIGINS') or '').strip()
+    if raw_origins and raw_origins != '*':
+        items = re.split(r'[,;\s]+', raw_origins)
+        for item in items:
+            clean_item = item.strip().rstrip('/')
+            if clean_item and clean_item not in origins:
+                origins.append(clean_item)
+
+    # Always include required production origins and dev origins
+    for default_orig in default_origins:
+        if default_orig not in origins:
+            origins.append(default_orig)
+
+    return origins
 
 class Config:
     """Base application configuration class."""
@@ -12,7 +46,7 @@ class Config:
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'default_jwt_secret_key_change_me')
     JWT_EXPIRATION_HOURS = int(os.getenv('JWT_EXPIRATION_HOURS', '24'))
     
-    # Production CORS Configuration
+    # Production CORS Configuration (Strict allowed origins for credential/cookie/JWT security)
     DEFAULT_CORS_ORIGINS = [
         'https://careerlens-iota.vercel.app',
         'http://localhost:5173',
@@ -20,20 +54,8 @@ class Config:
         'http://localhost:3000',
         'http://127.0.0.1:3000',
     ]
-    raw_frontend = (os.getenv('FRONTEND_URL') or '').strip().rstrip('/')
-    FRONTEND_URL = raw_frontend
-    raw_origins = (os.getenv('CORS_ORIGINS') or '').strip()
-    if raw_origins and raw_origins != '*':
-        CORS_ORIGINS = [o.strip().rstrip('/') for o in raw_origins.split(',') if o.strip()]
-        for origin in DEFAULT_CORS_ORIGINS:
-            if origin not in CORS_ORIGINS:
-                CORS_ORIGINS.append(origin)
-    elif raw_origins == '*':
-        CORS_ORIGINS = ['*']
-    else:
-        CORS_ORIGINS = list(DEFAULT_CORS_ORIGINS)
-    if FRONTEND_URL and FRONTEND_URL not in CORS_ORIGINS and '*' not in CORS_ORIGINS:
-        CORS_ORIGINS.append(FRONTEND_URL)
+    CORS_ORIGINS = _parse_allowed_origins()
+    FRONTEND_URL = (os.getenv('FRONTEND_URL') or 'https://careerlens-iota.vercel.app').strip().rstrip('/')
     
     # Google OAuth Configuration
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', 'your_google_oauth_client_id.apps.googleusercontent.com')
