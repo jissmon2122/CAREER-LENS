@@ -186,20 +186,24 @@ class ExtractionService:
             r'\b(M\.?Sc|Master of Science|MCA|Master of Computer Applications|M\.?Pharm|M\.?Com|MBA|MA|LL\.?M)\b',
             r'\b(B\.?Ed|M\.?Ed|Bachelor of Education)\b',
             r'\b(MBBS|MD|MS|BDS|GNM|ANM)\b',
+            r'\b(Diploma|Trade Certificate|ITI|Apprenticeship|Vocational Diploma|NVQ|Journeyman|Red Seal)\b',
+            r'\b(Associate Degree|Associate of Arts|Associate of Science|AAS)\b',
             r'\b(Ph\.?D|Doctorate)\b',
-            r'\b(High School|HSC|SSLC|12th|10th)\b'
+            r'\b(High School|HSC|SSLC|GED|12th|10th)\b'
         ]
 
         fields = [
             "Computer Science", "Information Technology", "Artificial Intelligence",
             "Data Science", "Software Engineering", "Electronics", "Electrical Engineering",
+            "Electrical", "Plumbing", "Welding", "Automotive", "HVAC", "Culinary Arts",
+            "Hospitality", "Logistics", "Carpentry", "Construction", "Agriculture",
             "Mechanical Engineering", "Civil Engineering", "Cyber Security", "Nursing",
             "Pharmacy", "Medicine", "Accounting", "Finance", "Business Administration",
             "Marketing", "Human Resources", "Law", "Education", "Architecture", "Design"
         ]
 
         # Extract 4-digit graduation years (e.g. 2020, 2024, 2026)
-        years = re.findall(r'\b(20[0-2][0-9])\b', text)
+        years = re.findall(r'\b(20[0-2][0-9]|19[8-9][0-9])\b', text)
         grad_year = years[-1] if years else None
 
         for pattern in degree_patterns:
@@ -215,7 +219,7 @@ class ExtractionService:
                 education_list.append({
                     "degree": degree_name,
                     "field": field_found or "General Studies",
-                    "institution": "University / College",
+                    "institution": "Trade School / College / Institute",
                     "graduation_year": grad_year
                 })
                 break
@@ -248,7 +252,7 @@ class ExtractionService:
 
     @staticmethod
     def extract_certifications(text):
-        """Extract certifications from Certifications section."""
+        """Extract certifications and trade/professional licenses from Certifications section."""
         certifications = []
         if not text:
             return certifications
@@ -256,7 +260,10 @@ class ExtractionService:
         cert_keywords = [
             "AWS", "Azure", "Google Cloud", "Coursera", "Udemy", "NPTEL",
             "Oracle", "Microsoft", "Certified", "Certificate", "RN", "CPA",
-            "Tally", "AutoCAD", "PMP", "Six Sigma", "BLS", "ACLS"
+            "Tally", "AutoCAD", "PMP", "Six Sigma", "BLS", "ACLS", "CPR",
+            "Journeyman", "Master Electrician", "Electrician License", "Plumbing License",
+            "EPA 608", "CDL", "CNA", "OSHA", "HACCP", "ServSafe", "Forklift",
+            "Welding", "ASE", "Teaching License", "Teaching Certificate"
         ]
 
         # Look for certification section
@@ -287,15 +294,37 @@ class ExtractionService:
         has_internship = bool(re.search(r'\b(intern|internship|trainee)\b', exp_text, re.IGNORECASE))
         lines = [line.strip('-•* ') for line in exp_text.splitlines() if len(line.strip()) > 10]
 
-        for line in lines[:2]:
-            extracted_title = line.split(':')[0] if ':' in line else ("Trainee / Intern" if has_internship else "Professional Role")
+        role_title_regex = re.compile(
+            r'\b((?:lead|senior|junior|staff|chief|master|journeyman|licensed|assistant|associate|head|principal|apprentice|registered|certified)?\s*'
+            r'(?:electrician|electrical technician|plumber|pipefitter|welder|fabricator|mechanic|auto technician|automotive technician|hvac technician|hvac service technician|'
+            r'nurse|registered nurse|staff nurse|nursing assistant|cna|caregiver|medical assistant|medical lab technician|'
+            r'teacher|school teacher|educator|lecturer|professor|tutor|instructor|'
+            r'accountant|bookkeeper|auditor|financial analyst|finance executive|accounts executive|'
+            r'chef|cook|line cook|sous chef|food service worker|bartender|'
+            r'driver|truck driver|delivery driver|forklift operator|warehouse associate|warehouse worker|logistics coordinator|'
+            r'carpenter|mason|laborer|construction worker|foreman|'
+            r'sales executive|sales representative|cashier|retail associate|customer service representative|'
+            r'administrative assistant|office administrator|receptionist|office assistant|'
+            r'software engineer|software developer|data analyst|data scientist|python developer|java developer|devops engineer|civil engineer|mechanical engineer))\b',
+            re.IGNORECASE
+        )
+
+        for line in lines[:3]:
+            title_match = role_title_regex.search(line)
+            if title_match:
+                extracted_title = title_match.group(1).title()
+            elif ':' in line:
+                extracted_title = line.split(':')[0].strip().title()
+            else:
+                extracted_title = "Trainee / Intern" if has_internship else "Professional Specialist"
+
             item = {
                 "company": "Organization",
                 "role": extracted_title,
-                "duration": "3 - 6 Months",
+                "duration": "1+ Years",
                 "description": line
             }
-            if has_internship:
+            if has_internship or "intern" in extracted_title.lower() or "trainee" in extracted_title.lower():
                 internships.append(item)
             else:
                 experiences.append(item)

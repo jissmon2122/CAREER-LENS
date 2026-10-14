@@ -1,100 +1,267 @@
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 class RoleInferenceEngine:
     """
     Universal Resume-Driven Candidate Profile & Target Role Inference Engine.
-    Analyzes parsed resume skills, education, experience, and domain text to determine
-    the candidate's actual profession (Healthcare/Nursing, Accounting/Finance,
-    Mechanical Engineering, Education/Teaching, Marketing, Civil, HR, Sales, Software/IT, etc.)
-    and automatically infers suitable target job roles and search queries.
+    Analyzes parsed resume skills, trade competencies, licenses, education, experience,
+    and domain text to determine the candidate's actual profession across ALL sectors
+    (Skilled Trades: Electrician, Plumber, Welder, Mechanic, HVAC; Healthcare, Education,
+    Accounting/Finance, Hospitality/Culinary, Logistics/Warehouse, Construction, Agriculture,
+    Sales/Retail, Office Administration, Engineering, and IT) and automatically infers
+    suitable target job roles and search queries.
     """
 
     DOMAINS = {
+        "SKILLED_TRADES_ELECTRICAL": {
+            "persona": "Licensed Electrician & Electrical Systems Technician",
+            "keywords": {
+                "electrician", "electrical", "wiring", "conduit", "circuit breaker",
+                "switchgear", "panel board", "multimeter", "high voltage", "low voltage",
+                "troubleshooting", "cable pulling", "motor control", "nec", "national electrical code",
+                "journeyman electrician", "master electrician", "electrical maintenance",
+                "electrical helper", "industrial electrical", "residential electrical",
+                "commercial electrical", "lockout", "tagout", "loto", "iti electrician",
+                "substation", "switchboard", "breaker", "wireman"
+            },
+            "base_roles": [
+                "Electrician", "Electrical Maintenance Technician", "Commercial Electrician",
+                "Industrial Electrician", "Residential Electrician", "Electrical Helper"
+            ],
+            "primary_search_keyword": "electrician",
+            "search_queries": ["Electrician", "Electrical Maintenance Technician", "Industrial Electrician"]
+        },
+        "SKILLED_TRADES_PLUMBING": {
+            "persona": "Plumber & Piping Systems Specialist",
+            "keywords": {
+                "plumber", "plumbing", "pipefitting", "pipefitter", "drainage", "pex",
+                "copper piping", "pvc", "fixture installation", "backflow", "leak detection",
+                "water heater", "plumbing apprentice", "journeyman plumber", "sewage",
+                "pipe threading", "soldering", "rough-in"
+            },
+            "base_roles": [
+                "Plumber", "Pipefitter", "Plumbing Technician", "Plumber Apprentice", "Maintenance Plumber"
+            ],
+            "primary_search_keyword": "plumber",
+            "search_queries": ["Plumber", "Pipefitter", "Plumbing Technician"]
+        },
+        "SKILLED_TRADES_WELDING": {
+            "persona": "Welder & Metal Fabrication Specialist",
+            "keywords": {
+                "welder", "welding", "mig", "tig", "stick welding", "smaw", "gmaw",
+                "gtaw", "arc welding", "metal fabrication", "fabrication", "torch cutting",
+                "structural welding", "pipe welder", "flux-cored", "grinding", "blueprint"
+            },
+            "base_roles": [
+                "Welder", "Metal Fabricator", "MIG Welder", "TIG Welder", "Pipe Welder", "Structural Welder"
+            ],
+            "primary_search_keyword": "welder",
+            "search_queries": ["Welder", "Metal Fabricator", "MIG Welder"]
+        },
+        "SKILLED_TRADES_MECHANIC": {
+            "persona": "Automotive & Maintenance Mechanic",
+            "keywords": {
+                "mechanic", "automotive repair", "auto mechanic", "auto technician",
+                "automotive technician", "engine diagnostics", "brake system", "suspension",
+                "transmission repair", "obd", "diesel mechanic", "heavy equipment mechanic",
+                "tire mounting", "wheel alignment", "preventative maintenance"
+            },
+            "base_roles": [
+                "Automotive Technician", "Auto Mechanic", "Maintenance Mechanic", "Diesel Mechanic", "Service Technician"
+            ],
+            "primary_search_keyword": "automotive mechanic",
+            "search_queries": ["Automotive Technician", "Auto Mechanic", "Maintenance Mechanic"]
+        },
+        "SKILLED_TRADES_HVAC": {
+            "persona": "HVAC & Refrigeration Systems Technician",
+            "keywords": {
+                "hvac", "refrigeration", "epa 608", "heat pump", "air conditioning",
+                "ductwork", "heating system", "ventilation", "hvac technician",
+                "hvac service", "freon", "air handler", "compressor", "thermostat"
+            },
+            "base_roles": [
+                "HVAC Technician", "Refrigeration Technician", "HVAC Service Technician", "HVAC Installer"
+            ],
+            "primary_search_keyword": "hvac technician",
+            "search_queries": ["HVAC Technician", "Refrigeration Technician", "HVAC Service"]
+        },
         "HEALTHCARE": {
-            "persona": "Healthcare & Nursing Specialist",
+            "persona": "Healthcare & Registered Nursing Specialist",
             "keywords": {
-                "nursing", "nurse", "staff nurse", "registered nurse", "clinical nurse",
+                "nursing", "nurse", "registered nurse", "staff nurse", "clinical nurse",
                 "patient care", "medication", "hospital", "vital signs", "wound dressing",
-                "iv administration", "pharmacist", "pharmacy", "medical", "anatomy",
-                "physiology", "b.sc nursing", "m.sc nursing", "gnm", "anm", "healthcare",
-                "doctor", "pharma", "lab technician", "clinical research"
+                "iv administration", "b.sc nursing", "m.sc nursing", "gnm", "anm",
+                "patient triage", "clinical", "rn", "catheterization", "icu nurse"
             },
-            "base_roles": ["Staff Nurse", "Registered Nurse", "Clinical Nurse", "Hospital Nurse", "Nursing Assistant", "Healthcare Associate"],
-            "primary_search_keyword": "nurse"
+            "base_roles": [
+                "Staff Nurse", "Registered Nurse", "Clinical Nurse", "Hospital Nurse", "Nursing Assistant"
+            ],
+            "primary_search_keyword": "nurse",
+            "search_queries": ["Staff Nurse", "Registered Nurse", "Clinical Nurse"]
         },
-        "ACCOUNTING_FINANCE": {
-            "persona": "Accounting & Finance Specialist",
+        "HEALTHCARE_SUPPORT": {
+            "persona": "Caregiver & Medical Support Specialist",
             "keywords": {
-                "accounting", "accountant", "tally", "gst", "bookkeeping", "taxation",
-                "financial analysis", "auditing", "accounts payable", "accounts receivable",
-                "balance sheet", "tally prime", "cpa", "chartered accountant", "ca",
-                "b.com", "m.com", "payroll", "invoice", "tally erp", "finance executive"
+                "caregiver", "caregiving", "home health aide", "cna", "certified nursing assistant",
+                "medical assistant", "elderly care", "patient hygiene", "phlebotomist",
+                "phlebotomy", "medical lab technician", "mlt", "specimen collection",
+                "activities of daily living", "assisted living"
             },
-            "base_roles": ["Accountant", "Accounts Executive", "Junior Accountant", "Accounts Assistant", "Finance Executive", "Financial Analyst"],
-            "primary_search_keyword": "accountant"
-        },
-        "MECHANICAL_ENGINEERING": {
-            "persona": "Mechanical Design & Manufacturing Engineer",
-            "keywords": {
-                "mechanical engineering", "autocad", "solidworks", "catia", "ansys",
-                "machining", "manufacturing", "cnc", "cad", "cam", "hvac", "thermodynamics",
-                "hydraulics", "mechanical design", "production engineering", "b.e mechanical",
-                "b.tech mechanical", "mechanical engineer"
-            },
-            "base_roles": ["Mechanical Engineer", "Design Engineer", "CAD Engineer", "Production Engineer", "Manufacturing Engineer", "Quality Engineer"],
-            "primary_search_keyword": "mechanical engineer"
+            "base_roles": [
+                "Caregiver", "Medical Assistant", "Certified Nursing Assistant", "Home Health Aide", "Medical Laboratory Technician"
+            ],
+            "primary_search_keyword": "medical assistant",
+            "search_queries": ["Caregiver", "Medical Assistant", "Certified Nursing Assistant"]
         },
         "EDUCATION": {
             "persona": "Education & Teaching Specialist",
             "keywords": {
                 "teaching", "teacher", "b.ed", "m.ed", "curriculum", "lesson planning",
                 "classroom management", "pedagogy", "tutor", "lecturer", "professor",
-                "education", "school teacher", "subject teacher", "academic counselor"
+                "education", "school teacher", "subject teacher", "academic counselor",
+                "special education", "tutoring", "student mentoring"
             },
-            "base_roles": ["School Teacher", "Subject Teacher", "Teaching Assistant", "Education Coordinator", "Academic Counselor", "Lecturer"],
-            "primary_search_keyword": "teacher"
+            "base_roles": [
+                "School Teacher", "Subject Teacher", "Tutor", "Education Coordinator", "Academic Counselor", "Lecturer"
+            ],
+            "primary_search_keyword": "teacher",
+            "search_queries": ["School Teacher", "Subject Teacher", "Teacher"]
         },
-        "MARKETING": {
-            "persona": "Digital Marketing Specialist",
+        "ACCOUNTING_FINANCE": {
+            "persona": "Accounting & Finance Specialist",
             "keywords": {
-                "marketing", "digital marketing", "seo", "sem", "google ads", "social media marketing",
-                "content marketing", "copywriting", "brand management", "email marketing",
-                "lead generation", "market research", "social media manager"
+                "accounting", "accountant", "tally", "gst", "bookkeeping", "bookkeeper",
+                "taxation", "financial analysis", "auditing", "auditor", "accounts payable",
+                "accounts receivable", "balance sheet", "tally prime", "cpa", "chartered accountant",
+                "ca", "b.com", "m.com", "payroll", "invoice", "tally erp", "tds", "finance executive"
             },
-            "base_roles": ["Marketing Executive", "Digital Marketing Specialist", "SEO Specialist", "Marketing Coordinator", "Social Media Specialist", "Content Marketer"],
-            "primary_search_keyword": "digital marketing"
+            "base_roles": [
+                "Accountant", "Accounts Executive", "Junior Accountant", "Bookkeeper", "Financial Analyst", "Finance Executive"
+            ],
+            "primary_search_keyword": "accountant",
+            "search_queries": ["Accountant", "Accounts Executive", "Junior Accountant"]
+        },
+        "ADMINISTRATION_OFFICE": {
+            "persona": "Office Administration & Executive Support Specialist",
+            "keywords": {
+                "administrative assistant", "office administrator", "executive assistant",
+                "receptionist", "office assistant", "office coordinator", "data entry",
+                "calendar management", "filing", "scheduling", "secretarial", "office support",
+                "front desk coordinator", "clerk"
+            },
+            "base_roles": [
+                "Administrative Assistant", "Office Administrator", "Executive Assistant", "Receptionist", "Office Coordinator", "Data Entry Specialist"
+            ],
+            "primary_search_keyword": "administrative assistant",
+            "search_queries": ["Administrative Assistant", "Office Administrator", "Receptionist"]
+        },
+        "HOSPITALITY_CULINARY": {
+            "persona": "Culinary & Hospitality Specialist",
+            "keywords": {
+                "chef", "cook", "line cook", "sous chef", "culinary arts", "food preparation",
+                "kitchen manager", "food safety", "haccp", "baking", "restaurant",
+                "hotel", "guest service", "front desk", "food service", "catering", "bartender"
+            },
+            "base_roles": [
+                "Chef", "Line Cook", "Kitchen Manager", "Food Service Worker", "Sous Chef", "Hotel Front Desk Associate"
+            ],
+            "primary_search_keyword": "chef",
+            "search_queries": ["Chef", "Line Cook", "Food Service Worker"]
+        },
+        "LOGISTICS_WAREHOUSE": {
+            "persona": "Logistics, Transportation & Warehouse Specialist",
+            "keywords": {
+                "warehouse", "forklift", "forklift operator", "order picker", "warehouse associate",
+                "material handler", "shipping", "receiving", "logistics", "cdl",
+                "commercial driver", "truck driver", "delivery driver", "inventory tracking",
+                "pallet jack", "supply chain", "freight"
+            },
+            "base_roles": [
+                "Forklift Operator", "Warehouse Associate", "Order Picker", "Material Handler", "Delivery Driver", "Logistics Coordinator"
+            ],
+            "primary_search_keyword": "warehouse associate",
+            "search_queries": ["Forklift Operator", "Warehouse Associate", "Order Picker"]
+        },
+        "CONSTRUCTION_CARPENTRY": {
+            "persona": "Construction & Carpentry Specialist",
+            "keywords": {
+                "carpenter", "carpentry", "framing", "drywall", "roofing", "masonry",
+                "concrete", "construction worker", "construction laborer", "foreman",
+                "scaffolding", "site safety", "osha", "mason"
+            },
+            "base_roles": [
+                "Carpenter", "Construction Worker", "Drywall Installer", "Construction Foreman", "Mason", "Construction Laborer"
+            ],
+            "primary_search_keyword": "carpenter",
+            "search_queries": ["Carpenter", "Construction Worker", "Drywall Installer"]
+        },
+        "SALES_RETAIL": {
+            "persona": "Sales & Retail Customer Specialist",
+            "keywords": {
+                "sales", "sales executive", "sales representative", "retail sales",
+                "cashier", "retail associate", "customer service representative",
+                "pos", "store associate", "b2b sales", "inside sales", "business development",
+                "client acquisition", "lead generation"
+            },
+            "base_roles": [
+                "Sales Executive", "Retail Associate", "Cashier", "Customer Service Representative", "Store Associate", "Account Executive"
+            ],
+            "primary_search_keyword": "sales executive",
+            "search_queries": ["Sales Executive", "Retail Associate", "Customer Service Representative"]
+        },
+        "AGRICULTURE": {
+            "persona": "Agricultural & Farm Operations Specialist",
+            "keywords": {
+                "agriculture", "farming", "crop management", "tractor operator",
+                "irrigation", "harvesting", "farm worker", "farm equipment", "livestock",
+                "soil management", "agronomy"
+            },
+            "base_roles": [
+                "Agricultural Specialist", "Farm Equipment Operator", "Crop Specialist", "Farm Worker"
+            ],
+            "primary_search_keyword": "agricultural worker",
+            "search_queries": ["Agricultural Specialist", "Farm Equipment Operator", "Farm Worker"]
+        },
+        "MECHANICAL_ENGINEERING": {
+            "persona": "Mechanical Design & Manufacturing Engineer",
+            "keywords": {
+                "mechanical engineering", "solidworks", "catia", "ansys", "machining",
+                "manufacturing", "cnc", "cad", "cam", "thermodynamics", "hydraulics",
+                "b.e mechanical", "b.tech mechanical", "mechanical design", "production engineering"
+            },
+            "base_roles": [
+                "Mechanical Engineer", "Design Engineer", "CAD Engineer", "Production Engineer", "Manufacturing Engineer"
+            ],
+            "primary_search_keyword": "mechanical engineer",
+            "search_queries": ["Mechanical Engineer", "Design Engineer", "CAD Engineer"]
         },
         "CIVIL_ENGINEERING": {
             "persona": "Civil & Structural Engineer",
             "keywords": {
-                "civil engineering", "structural design", "construction", "revit", "staad pro",
-                "surveying", "site engineer", "autocad civil", "building design", "b.e civil",
-                "b.tech civil", "quantity surveying"
+                "civil engineering", "site engineer", "structural engineer", "revit",
+                "staad pro", "quantity surveying", "surveying", "construction management",
+                "b.e civil", "b.tech civil", "autocad civil"
             },
-            "base_roles": ["Civil Engineer", "Site Engineer", "Structural Engineer", "Construction Project Engineer", "Quantity Surveyor"],
-            "primary_search_keyword": "civil engineer"
+            "base_roles": [
+                "Civil Engineer", "Site Engineer", "Structural Engineer", "Construction Project Engineer", "Quantity Surveyor"
+            ],
+            "primary_search_keyword": "civil engineer",
+            "search_queries": ["Civil Engineer", "Site Engineer", "Structural Engineer"]
         },
-        "HR": {
-            "persona": "Human Resources Specialist",
+        "ELECTRICAL_ENGINEERING": {
+            "persona": "Electrical & Control Systems Engineer",
             "keywords": {
-                "human resources", "recruitment", "talent acquisition", "employee relations",
-                "payroll management", "hr executive", "onboarding", "hris", "performance management",
-                "hr generalist", "hr recruiter"
+                "electrical engineering", "power electronics", "circuit design", "matlab",
+                "simulink", "plc", "scada", "b.e electrical", "b.tech electrical",
+                "power systems", "control systems", "embedded systems"
             },
-            "base_roles": ["HR Executive", "Talent Acquisition Specialist", "HR Recruiter", "HR Generalist", "HR Assistant"],
-            "primary_search_keyword": "human resources"
-        },
-        "SALES": {
-            "persona": "Sales & Business Development Representative",
-            "keywords": {
-                "sales", "business development", "client acquisition", "cold calling",
-                "b2b sales", "inside sales", "field sales", "key account management",
-                "crm", "sales executive", "lead generation"
-            },
-            "base_roles": ["Sales Executive", "Business Development Associate", "Account Executive", "Sales Representative", "Business Development Manager"],
-            "primary_search_keyword": "sales executive"
+            "base_roles": [
+                "Electrical Engineer", "Electrical Design Engineer", "Power Engineer", "Control Systems Engineer"
+            ],
+            "primary_search_keyword": "electrical engineer",
+            "search_queries": ["Electrical Engineer", "Electrical Design Engineer", "Power Engineer"]
         },
         "SOFTWARE_IT": {
             "persona": "Software & Technology Specialist",
@@ -104,40 +271,87 @@ class RoleInferenceEngine:
                 "html", "css", "vue", "angular", "aws", "docker", "kubernetes", "git",
                 "machine learning", "data science", "nlp", "ai", "pandas", "numpy",
                 "scikit-learn", "tensorflow", "pytorch", "devops", "software engineer",
-                "software developer", "full stack", "backend", "frontend", "computer science"
+                "software developer", "full stack", "backend", "frontend", "computer science",
+                "b.tech cse", "bca", "mca", "information technology"
             },
-            "base_roles": ["Software Engineer", "Python Developer", "Backend Developer", "Full Stack Developer", "Data Analyst", "Software Developer"],
-            "primary_search_keyword": "software engineer"
+            "base_roles": [
+                "Software Engineer", "Full Stack Developer", "Backend Developer", "Frontend Developer", "Python Developer", "Data Analyst"
+            ],
+            "primary_search_keyword": "software engineer",
+            "search_queries": ["Software Engineer", "Full Stack Developer", "Backend Developer"]
         },
-        "ELECTRICAL_ENGINEERING": {
-            "persona": "Electrical & Control Systems Engineer",
+        "MARKETING": {
+            "persona": "Digital Marketing Specialist",
             "keywords": {
-                "electrical engineering", "electrical engineer", "power electronics", "circuit design",
-                "plc", "scada", "high voltage", "power systems", "switchgear", "b.e electrical",
-                "b.tech electrical", "transformer", "single line diagram", "substation"
+                "marketing", "digital marketing", "seo", "sem", "google ads", "social media marketing",
+                "content marketing", "copywriting", "brand management", "email marketing",
+                "lead generation", "market research"
             },
-            "base_roles": ["Electrical Engineer", "Electrical Design Engineer", "Power Engineer", "Control Systems Engineer", "Electrical Maintenance Engineer"],
-            "primary_search_keyword": "electrical engineer"
+            "base_roles": [
+                "Marketing Executive", "Digital Marketing Specialist", "SEO Specialist", "Content Marketer", "Social Media Coordinator"
+            ],
+            "primary_search_keyword": "digital marketing",
+            "search_queries": ["Marketing Executive", "Digital Marketing Specialist", "SEO Specialist"]
+        },
+        "HR": {
+            "persona": "Human Resources Specialist",
+            "keywords": {
+                "human resources", "recruitment", "talent acquisition", "employee relations",
+                "payroll management", "hr executive", "onboarding", "hris", "performance management",
+                "hr generalist", "hr recruiter"
+            },
+            "base_roles": [
+                "HR Executive", "Talent Acquisition Specialist", "HR Generalist", "HR Recruiter"
+            ],
+            "primary_search_keyword": "human resources",
+            "search_queries": ["HR Executive", "Talent Acquisition Specialist", "HR Generalist"]
+        },
+        "LEGAL": {
+            "persona": "Legal Professional",
+            "keywords": {
+                "lawyer", "advocate", "legal counsel", "ll.b", "ll.m", "litigation",
+                "corporate law", "contract drafting", "paralegal", "compliance"
+            },
+            "base_roles": [
+                "Legal Counsel", "Legal Associate", "Corporate Lawyer", "Paralegal"
+            ],
+            "primary_search_keyword": "legal counsel",
+            "search_queries": ["Legal Counsel", "Legal Associate", "Corporate Lawyer"]
         },
         "SCIENCE_RESEARCH": {
-            "persona": "Science & Research Specialist",
+            "persona": "Scientific Researcher",
             "keywords": {
-                "astrophysics", "astronomy", "astrophysicist", "astronomer", "physics", "physicist",
-                "chemistry", "chemist", "biochemistry", "biology", "biologist", "microbiology",
-                "genetics", "geology", "geologist", "environmental science", "scientific research",
-                "research scientist", "postdoctoral", "ph.d", "phd", "spectroscopy", "telescope",
-                "quantum", "laboratory research"
+                "research scientist", "physicist", "chemist", "biologist", "astrophysicist",
+                "microbiology", "laboratory research", "postdoctoral", "ph.d", "phd", "spectroscopy"
             },
-            "base_roles": ["Research Scientist", "Staff Scientist", "Research Associate", "Postdoctoral Researcher", "Scientist"],
-            "primary_search_keyword": "research scientist"
+            "base_roles": [
+                "Research Scientist", "Staff Scientist", "Lab Researcher", "Research Associate"
+            ],
+            "primary_search_keyword": "research scientist",
+            "search_queries": ["Research Scientist", "Staff Scientist", "Research Associate"]
+        },
+        "ARCHITECTURE": {
+            "persona": "Architectural Designer",
+            "keywords": {
+                "architecture", "architect", "b.arch", "m.arch", "building design", "revit",
+                "sketchup", "spatial planning", "architectural drafting", "bim", "interior architecture",
+                "residential design", "commercial architecture", "autocad"
+            },
+            "base_roles": [
+                "Architectural Designer", "Architect", "BIM Architect", "Building Designer"
+            ],
+            "primary_search_keyword": "architect",
+            "search_queries": ["Architectural Designer", "Architect", "BIM Architect"]
         }
     }
 
     @classmethod
     def infer_candidate_profile(cls, analysis_json: dict) -> dict:
         """
-        Analyzes parsed resume analysis JSON to determine the candidate's actual
-        professional domain, persona, inferred target roles, and candidate-specific search queries.
+        Analyzes parsed resume analysis JSON using multi-signal evidence weighting
+        (Work History > Licenses/Certifications > Skills > Education > Text) to determine
+        the candidate's authentic profession. Never forces IT or Software roles.
+        Supports multi-discipline profiles and uncertainty flags.
         """
         if not analysis_json:
             return cls._get_default_profile()
@@ -149,6 +363,8 @@ class RoleInferenceEngine:
                 if isinstance(sk_list, list):
                     flat_skills.extend(sk_list)
             tech_skills = flat_skills
+        elif not isinstance(tech_skills, list):
+            tech_skills = []
 
         soft_skills = analysis_json.get("soft_skills", [])
         if not isinstance(soft_skills, list):
@@ -174,241 +390,120 @@ class RoleInferenceEngine:
         current_or_latest_role = None
         previous_roles = []
         if work_exp:
-            current_or_latest_role = work_exp[0].get("role")
+            current_or_latest_role = str(work_exp[0].get("role", "")).strip()
             for w in work_exp[1:]:
                 if w.get("role"):
-                    previous_roles.append(str(w.get("role")))
+                    previous_roles.append(str(w.get("role")).strip())
 
         yrs_exp = analysis_json.get("years_of_experience") or analysis_json.get("total_experience_years")
-
-        # Construct comprehensive candidate text representation across all sections
-        all_candidate_text = f"{current_or_latest_role or ''} {' '.join(previous_roles)} {primary_degree or ''} {primary_specialization or ''} {' '.join(str(s) for s in tech_skills)} {' '.join(str(s) for s in soft_skills)} {raw_text}".lower()
-
-        all_candidate_terms = set()
-        for term in all_candidate_text.replace(",", " ").replace(".", " ").replace("/", " ").replace("-", " ").split():
-            clean_term = term.strip().lower()
-            if len(clean_term) > 2:
-                all_candidate_terms.add(clean_term)
-        for s in (tech_skills + soft_skills):
-            if s:
-                all_candidate_terms.add(str(s).lower().strip())
-
         exp_level = str(analysis_json.get("experience_level", "")).lower()
-        edu_level = str(analysis_json.get("education_level", "Degree Graduate"))
+        edu_level = str(analysis_json.get("education_level", "Trade / Graduate"))
 
-        # Score domain clusters based on matching terms count
-        domain_scores = {}
+        # Build clean token sets for multi-signal evidence scoring
+        cand_work_roles_text = f"{current_or_latest_role or ''} {' '.join(previous_roles)}".lower()
+        cand_certs_text = " ".join(str(c) for c in certs).lower()
+        cand_edu_text = f"{primary_degree or ''} {primary_specialization or ''}".lower()
+        cand_skills_text = " ".join(str(s) for s in (tech_skills + soft_skills)).lower()
+
+        # Tokenize raw text safely into words
+        raw_words = set(re.findall(r'\b[a-z0-9\-\+\.#]+\b', raw_text))
+
+        domain_evidence_scores = {}
+
         for d_key, d_data in cls.DOMAINS.items():
-            matches = all_candidate_terms.intersection(d_data["keywords"])
-            domain_scores[d_key] = len(matches)
+            score = 0.0
+            kw_set = d_data["keywords"]
 
-        top_domain_key = max(domain_scores, key=domain_scores.get) if domain_scores else None
-        top_score = domain_scores.get(top_domain_key, 0) if top_domain_key else 0
+            # Signal 1: Work Experience Role Matches (Weight: 4.0 per match)
+            # Employment history is the strongest single indicator of actual profession
+            for kw in kw_set:
+                if len(kw) > 3:
+                    if re.search(r'\b' + re.escape(kw) + r'\b', cand_work_roles_text):
+                        score += 4.0
+                        if current_or_latest_role and re.search(r'\b' + re.escape(kw) + r'\b', current_or_latest_role.lower()):
+                            score += 2.0  # Extra weight for current role
 
-        # Extract tools (software, hardware, instruments)
-        known_tools = ["AutoCAD", "SolidWorks", "CATIA", "ANSYS", "Revit", "STAAD Pro", "Tally", "Photoshop", "Illustrator", "Figma", "Excel", "Power BI", "Tableau", "Git", "Docker", "VS Code", "Jira", "MATLAB", "Simulink", "QuickBooks", "SAP"]
-        extracted_tools = [t for t in known_tools if any(t.lower() == str(sk).lower() for sk in tech_skills) or t.lower() in raw_text]
+            # Signal 2: Licenses & Certifications (Weight: 3.5 per match)
+            # Professional trade licenses, state board credentials, CDL, RN, CPA, etc.
+            for kw in kw_set:
+                if len(kw) > 3 and re.search(r'\b' + re.escape(kw) + r'\b', cand_certs_text):
+                    score += 3.5
 
-        # Explicit Profession Identity Recognition (Checks title, degree, skills, raw text)
-        explicit_identity = None
-        explicit_domain = None
-        explicit_queries = []
-        explicit_primary_roles = []
-        explicit_related_roles = []
-        explicit_alt_roles = []
+            # Signal 3: Specific Skills & Tools (Weight: 2.0 per match)
+            for kw in kw_set:
+                if len(kw) > 2 and re.search(r'\b' + re.escape(kw) + r'\b', cand_skills_text):
+                    score += 2.0
 
-        text_for_identity = all_candidate_text
-        software_score = domain_scores.get("SOFTWARE_IT", 0)
+            # Signal 4: Education & Vocational Qualifications (Weight: 1.5 per match)
+            # ITI, Trade Diploma, B.Sc Nursing, B.Ed, etc.
+            for kw in kw_set:
+                if len(kw) > 3 and re.search(r'\b' + re.escape(kw) + r'\b', cand_edu_text):
+                    score += 1.5
 
-        # Explicit Profession Identity Recognition (Checks title, degree, skills, raw text)
-        # Priority 1: Software Engineering, Data Science, AI & Technology
-        if any(k in text_for_identity for k in ["machine learning", "deep learning", "artificial intelligence", "data scientist", "nlp", "computer vision", "tensorflow", "pytorch", "llm", "genai", "generative ai"]):
-            explicit_identity = "Data Science & AI Specialist"
-            explicit_domain = "SOFTWARE_IT"
-            explicit_primary_roles = ["Data Scientist", "Machine Learning Engineer", "AI Engineer"]
-            explicit_related_roles = ["Data Analyst", "Applied Scientist", "Python Developer"]
-            explicit_queries = ["Data Scientist", "Machine Learning Engineer", "Python Developer"]
-        elif any(k in text_for_identity for k in ["data analyst", "data analytics", "business intelligence", "bi analyst", "power bi", "tableau", "sql analyst", "data reporter"]):
-            explicit_identity = "Data Analytics & BI Specialist"
-            explicit_domain = "SOFTWARE_IT"
-            explicit_primary_roles = ["Data Analyst", "Business Intelligence Analyst", "Analytics Specialist"]
-            explicit_related_roles = ["Data Engineer", "Reporting Analyst", "Python Developer"]
-            explicit_queries = ["Data Analyst", "BI Analyst", "Data Analytics"]
-        elif any(k in text_for_identity for k in ["devops", "cloud engineer", "aws engineer", "azure engineer", "site reliability engineer", "sre", "kubernetes", "docker", "ci/cd", "infrastructure engineer"]):
-            explicit_identity = "Cloud & DevOps Engineer"
-            explicit_domain = "SOFTWARE_IT"
-            explicit_primary_roles = ["DevOps Engineer", "Cloud Engineer", "Site Reliability Engineer"]
-            explicit_related_roles = ["Platform Engineer", "Software Engineer", "Systems Engineer"]
-            explicit_queries = ["DevOps Engineer", "Cloud Engineer"]
-        elif any(k in text_for_identity for k in ["software architect", "solution architect", "solutions architect", "system architect", "cloud architect", "enterprise architect"]):
-            explicit_identity = "Software & Systems Architect"
-            explicit_domain = "SOFTWARE_IT"
-            explicit_primary_roles = ["Software Architect", "Solutions Architect", "Senior Software Engineer"]
-            explicit_related_roles = ["Backend Architect", "Cloud Architect", "Lead Developer"]
-            explicit_queries = ["Software Architect", "Solutions Architect", "Software Engineer"]
-        elif any(k in text_for_identity for k in [
-            "software engineer", "software developer", "full stack", "fullstack", "backend developer",
-            "frontend developer", "web developer", "python developer", "java developer", "react developer",
-            "node developer", "computer science", "b.tech in computer", "b.tech cse", "b.e cse", "b.e. cse",
-            "bca", "mca", "information technology"
-        ]) or (software_score >= 3):
-            explicit_identity = "Software & Technology Specialist"
-            explicit_domain = "SOFTWARE_IT"
-            explicit_primary_roles = ["Software Engineer", "Full Stack Developer", "Backend Developer"]
-            explicit_related_roles = ["Frontend Developer", "Python Developer", "Software Developer"]
-            explicit_queries = ["Software Engineer", "Full Stack Developer", "Backend Developer"]
-        # Priority 2: Other Professional Domains (Education, Sciences, Engineering, Marketing, etc.)
-        elif any(k in text_for_identity for k in ["b.ed", "m.ed", "school teacher", "high school teacher", "subject teacher", "classroom management", "pedagogy", "curriculum development", "lesson planning"]):
-            explicit_identity = "Education & Teaching Specialist"
-            explicit_domain = "EDUCATION"
-            explicit_primary_roles = ["School Teacher", "Subject Teacher", "Teaching Assistant"]
-            explicit_related_roles = ["Education Coordinator", "Academic Counselor", "Lecturer"]
-            explicit_queries = ["Teacher", "School Teacher", "Subject Teacher"]
-        elif any(k in text_for_identity for k in ["astrophysics", "astrophysicist", "astronomy", "astronomer", "stellar", "cosmology"]):
-            explicit_identity = "Astrophysicist / Astronomical Researcher"
-            explicit_domain = "SCIENCE_RESEARCH"
-            explicit_primary_roles = ["Astrophysicist", "Astronomer", "Research Scientist"]
-            explicit_related_roles = ["Data Scientist", "Observational Astronomer", "Postdoctoral Fellow"]
-            explicit_queries = ["Astrophysicist", "Astronomer", "Research Scientist"]
-        elif any(k in text_for_identity for k in ["physics", "physicist", "quantum", "condensed matter", "particle physics"]):
-            explicit_identity = "Physicist / Physics Researcher"
-            explicit_domain = "SCIENCE_RESEARCH"
-            explicit_primary_roles = ["Physicist", "Research Scientist", "Applied Physicist"]
-            explicit_related_roles = ["Laboratory Scientist", "Postdoctoral Researcher", "Data Analyst"]
-            explicit_queries = ["Physicist", "Research Scientist"]
-        elif any(k in text_for_identity for k in ["chemistry", "chemist", "analytical chemistry", "organic chemistry", "biochemistry"]):
-            explicit_identity = "Chemist / Chemical Researcher"
-            explicit_domain = "SCIENCE_RESEARCH"
-            explicit_primary_roles = ["Chemist", "Analytical Chemist", "Research Scientist"]
-            explicit_related_roles = ["Lab Manager", "Quality Control Chemist", "R&D Scientist"]
-            explicit_queries = ["Chemist", "Analytical Chemist", "Research Scientist"]
-        elif any(k in text_for_identity for k in ["biology", "biologist", "microbiology", "microbiologist", "molecular biology", "genetics"]):
-            explicit_identity = "Biologist / Life Science Researcher"
-            explicit_domain = "SCIENCE_RESEARCH"
-            explicit_primary_roles = ["Biologist", "Microbiologist", "Research Scientist"]
-            explicit_related_roles = ["Life Scientist", "Biotech Associate", "Lab Scientist"]
-            explicit_queries = ["Biologist", "Microbiologist", "Research Scientist"]
-        elif any(k in text_for_identity for k in ["scientific research", "research scientist", "postdoctoral researcher", "phd researcher"]):
-            explicit_identity = "Research Scientist"
-            explicit_domain = "SCIENCE_RESEARCH"
-            explicit_primary_roles = ["Research Scientist", "Staff Scientist", "Research Associate"]
-            explicit_related_roles = ["Postdoctoral Fellow", "R&D Specialist"]
-            explicit_queries = ["Research Scientist", "Staff Scientist"]
-        elif any(k in text_for_identity for k in ["civil engineering", "civil engineer", "site engineer", "structural design", "structural engineer", "autocad civil", "staad pro", "quantity surveying"]):
-            explicit_identity = "Civil & Structural Engineer"
-            explicit_domain = "CIVIL_ENGINEERING"
-            explicit_primary_roles = ["Civil Engineer", "Site Engineer", "Structural Engineer"]
-            explicit_related_roles = ["Construction Project Engineer", "Quantity Surveyor"]
-            explicit_queries = ["Civil Engineer", "Site Engineer", "Structural Engineer"]
-        elif any(k in text_for_identity for k in ["nursing", "registered nurse", "staff nurse", "clinical nurse", "b.sc nursing", "patient care"]):
-            explicit_identity = "Healthcare & Nursing Specialist"
-            explicit_domain = "HEALTHCARE"
-            explicit_primary_roles = ["Staff Nurse", "Registered Nurse", "Clinical Nurse"]
-            explicit_related_roles = ["Hospital Nurse", "Nursing Assistant", "Healthcare Associate"]
-            explicit_queries = ["Nurse", "Staff Nurse", "Registered Nurse"]
-        elif any(k in text_for_identity for k in ["accountant", "accounting", "tally prime", "tally erp", "tally", "gst", "bookkeeping", "accounts payable", "accounts receivable"]):
-            explicit_identity = "Accounting & Finance Specialist"
-            explicit_domain = "ACCOUNTING_FINANCE"
-            explicit_primary_roles = ["Accountant", "Accounts Executive", "Junior Accountant"]
-            explicit_related_roles = ["Accounts Assistant", "Finance Executive", "Financial Analyst"]
-            explicit_queries = ["Accountant", "Accounts Executive", "Junior Accountant"]
-        elif any(k in text_for_identity for k in ["mechanical engineering", "mechanical engineer", "solidworks", "catia", "ansys", "machining", "thermodynamics"]):
-            explicit_identity = "Mechanical Design & Manufacturing Engineer"
-            explicit_domain = "MECHANICAL_ENGINEERING"
-            explicit_primary_roles = ["Mechanical Engineer", "Design Engineer", "CAD Engineer"]
-            explicit_related_roles = ["Production Engineer", "Manufacturing Engineer", "Quality Engineer"]
-            explicit_queries = ["Mechanical Engineer", "Design Engineer", "CAD Engineer"]
-        elif any(k in text_for_identity for k in ["electrical engineering", "electrical engineer", "power electronics", "plc", "scada", "single line diagram"]):
-            explicit_identity = "Electrical Engineer"
-            explicit_domain = "ELECTRICAL_ENGINEERING"
-            explicit_primary_roles = ["Electrical Engineer", "Electrical Design Engineer", "Power Engineer"]
-            explicit_related_roles = ["Control Systems Engineer", "PLC Automation Engineer", "Electrical Maintenance Engineer"]
-            explicit_queries = ["Electrical Engineer", "Electrical Design Engineer", "Power Engineer"]
-        elif any(k in text_for_identity for k in ["digital marketing", "search engine marketing", "google ads", "social media marketing", "content marketing", "seo specialist", "marketing executive"]) and software_score < 3:
-            explicit_identity = "Digital Marketing Specialist"
-            explicit_domain = "MARKETING"
-            explicit_primary_roles = ["Marketing Executive", "Digital Marketing Specialist", "SEO Specialist"]
-            explicit_related_roles = ["Marketing Coordinator", "Social Media Specialist", "Content Marketer"]
-            explicit_queries = ["Digital Marketing", "Marketing Executive", "SEO Specialist"]
-        elif any(k in text_for_identity for k in ["human resources", "talent acquisition", "recruitment", "onboarding", "hris", "hr executive", "hr generalist"]):
-            explicit_identity = "Human Resources Specialist"
-            explicit_domain = "HR"
-            explicit_primary_roles = ["HR Executive", "Talent Acquisition Specialist", "HR Recruiter"]
-            explicit_related_roles = ["HR Generalist", "HR Assistant"]
-            explicit_queries = ["Human Resources", "HR Executive", "Talent Acquisition Specialist"]
-        elif any(k in text_for_identity for k in ["b2b sales", "inside sales", "field sales", "client acquisition", "sales executive", "business development"]):
-            explicit_identity = "Sales & Business Development Representative"
-            explicit_domain = "SALES"
-            explicit_primary_roles = ["Sales Executive", "Business Development Associate", "Account Executive"]
-            explicit_related_roles = ["Sales Representative", "Business Development Manager"]
-            explicit_queries = ["Sales Executive", "Business Development Associate", "Account Executive"]
-        elif any(k in text_for_identity for k in ["graphic design", "graphic designer", "photoshop", "illustrator", "indesign", "figma", "ui design", "ux design", "typography"]):
-            explicit_identity = "Graphic / UI Designer"
-            explicit_domain = "DESIGN"
-            explicit_primary_roles = ["Graphic Designer", "UI/UX Designer", "Visual Designer"]
-            explicit_related_roles = ["Brand Identity Designer", "Creative Associate", "Digital Artist"]
-            explicit_queries = ["Graphic Designer", "UI Designer", "Visual Designer"]
-        elif any(k in text_for_identity for k in ["lawyer", "advocate", "legal", "ll.b", "ll.m", "litigation", "contract drafting", "corporate law"]):
-            explicit_identity = "Legal Professional / Lawyer"
-            explicit_domain = "LEGAL"
-            explicit_primary_roles = ["Legal Counsel", "Legal Associate", "Corporate Lawyer"]
-            explicit_related_roles = ["Contracts Specialist", "Legal Advisor", "Compliance Officer"]
-            explicit_queries = ["Legal Counsel", "Legal Associate", "Corporate Lawyer"]
-        elif any(k in text_for_identity for k in ["b.arch", "m.arch", "building design", "revit architecture", "spatial design", "interior architecture", "landscape architect", "architectural drafting"]) and software_score < 2:
-            explicit_identity = "Architectural Designer"
-            explicit_domain = "ARCHITECTURE"
-            explicit_primary_roles = ["Architect", "Architectural Designer", "Building Designer"]
-            explicit_related_roles = ["BIM Architect", "Interior Architect", "Draftsman"]
-            explicit_queries = ["Architect", "Architectural Designer", "Building Designer"]
-        elif any(k in text_for_identity for k in ["pharmacist", "pharmacy", "b.pharm", "m.pharm", "pharmacology", "dispensing"]):
-            explicit_identity = "Pharmacist"
-            explicit_domain = "PHARMACY"
-            explicit_primary_roles = ["Pharmacist", "Clinical Pharmacist", "Retail Pharmacist"]
-            explicit_related_roles = ["Pharma Executive", "Medical Representative", "Drug Safety Associate"]
-            explicit_queries = ["Pharmacist", "Clinical Pharmacist", "Pharma Executive"]
-        elif any(k in text_for_identity for k in ["logistics", "supply chain", "inventory management", "procurement", "warehouse", "vendor management"]):
-            explicit_identity = "Logistics & Supply Chain Specialist"
-            explicit_domain = "LOGISTICS_SUPPLY_CHAIN"
-            explicit_primary_roles = ["Supply Chain Coordinator", "Logistics Executive", "Procurement Associate"]
-            explicit_related_roles = ["Inventory Controller", "Warehouse Supervisor", "Vendor Management Executive"]
-            explicit_queries = ["Supply Chain Coordinator", "Logistics Executive", "Procurement Specialist"]
-        elif any(k in text_for_identity for k in ["hospitality", "hotel management", "front desk", "guest relations", "catering"]):
-            explicit_identity = "Hospitality Professional"
-            explicit_domain = "HOSPITALITY"
-            explicit_primary_roles = ["Hospitality Executive", "Front Desk Officer", "Guest Relations Executive"]
-            explicit_related_roles = ["Hotel Operations Associate", "Event Coordinator", "Customer Service Executive"]
-            explicit_queries = ["Hospitality Executive", "Guest Relations Executive", "Hotel Operations"]
+            # Signal 5: General Text Keywords Occurrence (Weight: 0.5 per distinct match)
+            matched_raw_kws = kw_set.intersection(raw_words)
+            score += len(matched_raw_kws) * 0.5
 
-        # If an explicit profession was identified, prioritize it
-        if explicit_identity:
-            prof_identity = explicit_identity
-            prof_domain = explicit_domain
-            primary_roles = explicit_primary_roles
-            related_roles = explicit_related_roles
-            alt_roles = ["Professional Associate", "Operations Specialist"]
-            search_queries = explicit_queries
-        elif top_score > 0 and top_domain_key in cls.DOMAINS:
+            domain_evidence_scores[d_key] = round(score, 2)
+
+        # Sort candidate domains by evidence score descending
+        sorted_domains = sorted(domain_evidence_scores.items(), key=lambda x: x[1], reverse=True)
+        top_domain_key, top_score = sorted_domains[0] if sorted_domains else ("GENERAL_PROFESSIONAL", 0.0)
+        second_domain_key, second_score = sorted_domains[1] if len(sorted_domains) > 1 else (None, 0.0)
+
+        # Determine confidence and ambiguity
+        is_ambiguous = False
+        needs_confirmation = False
+        alternative_professions = []
+
+        if top_score == 0.0:
+            # Genuine fallback when no specific profession keywords detected
+            prof_domain = "GENERAL_PROFESSIONAL"
+            prof_identity = "Professional Candidate"
+            primary_roles = ["Professional Associate", "Operations Specialist", "Executive Assistant"]
+            related_roles = ["Service Coordinator", "General Associate"]
+            alt_roles = ["Project Assistant"]
+            search_queries = ["Associate", "Coordinator"]
+            confidence = "LOW"
+            is_ambiguous = True
+            needs_confirmation = True
+        else:
             domain_data = cls.DOMAINS[top_domain_key]
             prof_domain = top_domain_key
             prof_identity = domain_data["persona"]
             primary_roles = list(domain_data["base_roles"][:3])
             related_roles = list(domain_data["base_roles"][3:])
-            alt_roles = [f"{domain_data['primary_search_keyword'].title()} Associate", "Operations Associate"]
-            search_queries = [domain_data["primary_search_keyword"].title()] + list(domain_data["base_roles"][:2])
-        else:
-            prof_domain = "GENERAL_PROFESSIONAL"
-            first_skill = tech_skills[0].title() if tech_skills else "Professional"
-            prof_identity = f"{first_skill} Specialist" if tech_skills else "Professional Candidate"
-            primary_roles = [f"{first_skill} Specialist", f"{first_skill} Executive", f"{first_skill} Associate"]
-            related_roles = [f"{first_skill} Coordinator", "Operations Associate"]
-            alt_roles = ["General Professional", "Project Assistant"]
-            search_queries = [first_skill, f"{first_skill} Executive"]
+            alt_roles = [f"{domain_data['primary_search_keyword'].title()} Associate", "Operations Specialist"]
+            search_queries = list(domain_data.get("search_queries", [domain_data["primary_search_keyword"].title()]))
+
+            # Check for close secondary domain (multi-discipline / ambiguity)
+            if second_score > 0 and (top_score - second_score) < 2.5:
+                is_ambiguous = True
+                second_domain_data = cls.DOMAINS[second_domain_key]
+                alternative_professions.append({
+                    "domain": second_domain_key,
+                    "persona": second_domain_data["persona"],
+                    "primary_role": second_domain_data["base_roles"][0],
+                    "evidence_score": second_score
+                })
+                confidence = "MEDIUM"
+            else:
+                confidence = "HIGH"
+
+        # Check if work history specifically names an exact role that should lead primary roles
+        if current_or_latest_role and len(current_or_latest_role) > 3:
+            role_clean = current_or_latest_role.title()
+            if role_clean not in primary_roles and prof_domain != "GENERAL_PROFESSIONAL":
+                # Prepend the candidate's actual job title if it matches domain keywords
+                d_kws = cls.DOMAINS.get(prof_domain, {}).get("keywords", set())
+                if any(w in d_kws for w in current_or_latest_role.lower().split()):
+                    primary_roles = [role_clean] + primary_roles[:2]
+                    search_queries = [role_clean] + [q for q in search_queries if q != role_clean]
 
         is_entry = any(k in exp_level for k in ["student", "fresher", "0-2", "graduate", "junior", "entry"])
-        if is_entry:
+        if is_entry and prof_domain not in ["SKILLED_TRADES_ELECTRICAL", "SKILLED_TRADES_PLUMBING", "SKILLED_TRADES_WELDING"]:
             primary_roles = [f"Junior {r}" for r in primary_roles[:2]] + [primary_roles[0]]
 
-        # Ensure search_queries has unique, non-empty, title-cased strings
         clean_queries = []
         for q in search_queries:
             sq = str(q).strip()
@@ -418,32 +513,52 @@ class RoleInferenceEngine:
             clean_queries = [primary_roles[0]]
 
         industries_map = {
-            "HEALTHCARE": ["Healthcare & Hospitals", "Pharmaceuticals", "Medical Devices"],
-            "ACCOUNTING_FINANCE": ["Accounting & Audit", "Financial Services", "Banking", "Corporate Finance"],
-            "MECHANICAL_ENGINEERING": ["Automotive", "Manufacturing", "Aerospace & Defense", "Heavy Machinery"],
-            "CIVIL_ENGINEERING": ["Construction & Real Estate", "Infrastructure", "Structural Engineering"],
-            "ELECTRICAL_ENGINEERING": ["Power & Energy", "Electrical Equipment", "Automation & Robotics"],
-            "EDUCATION": ["K-12 Education", "Higher Education", "EdTech", "Academic Research"],
-            "MARKETING": ["Digital Media & Advertising", "E-Commerce", "Brand Management"],
-            "SALES": ["B2B Enterprise Sales", "Consumer Retail", "Business Development"],
+            "SKILLED_TRADES_ELECTRICAL": ["Electrical Construction", "Building Maintenance", "Industrial Manufacturing", "Utilities"],
+            "SKILLED_TRADES_PLUMBING": ["Plumbing & Piping", "Construction", "Facility Maintenance"],
+            "SKILLED_TRADES_WELDING": ["Metal Fabrication", "Manufacturing", "Structural Construction"],
+            "SKILLED_TRADES_MECHANIC": ["Automotive Services", "Fleet Maintenance", "Transportation Repair"],
+            "SKILLED_TRADES_HVAC": ["HVAC/R Contracting", "Building Services", "Mechanical Contracting"],
+            "HEALTHCARE": ["Healthcare & Hospitals", "Clinical Care", "Medical Facilities"],
+            "HEALTHCARE_SUPPORT": ["Home Healthcare", "Assisted Living", "Outpatient Clinics", "Diagnostic Labs"],
+            "EDUCATION": ["K-12 Education", "Higher Education", "Vocational Training", "Tutoring"],
+            "ACCOUNTING_FINANCE": ["Accounting & Audit", "Financial Services", "Corporate Finance"],
+            "ADMINISTRATION_OFFICE": ["Corporate Administration", "Office Management", "Professional Services"],
+            "HOSPITALITY_CULINARY": ["Restaurants & Food Service", "Hotels & Lodging", "Catering & Events"],
+            "LOGISTICS_WAREHOUSE": ["Warehousing & Distribution", "Freight & Logistics", "Transportation"],
+            "CONSTRUCTION_CARPENTRY": ["Residential & Commercial Construction", "Carpentry & Framing"],
+            "SALES_RETAIL": ["Retail & Consumer Goods", "B2B Sales", "Customer Support"],
+            "AGRICULTURE": ["Farming & Agriculture", "Agribusiness", "Crop & Livestock Production"],
+            "MECHANICAL_ENGINEERING": ["Automotive", "Manufacturing", "Heavy Machinery", "Aerospace"],
+            "CIVIL_ENGINEERING": ["Civil Infrastructure", "Structural Engineering", "Construction Management"],
+            "ELECTRICAL_ENGINEERING": ["Power Systems", "Control Systems", "Electrical Engineering"],
             "SOFTWARE_IT": ["Software Development", "Information Technology", "Cloud & SaaS"],
-            "DESIGN": ["Creative Media", "UI/UX Design", "Product Design"],
-            "LEGAL": ["Legal Services", "Corporate Law", "Regulatory Compliance"],
-            "ARCHITECTURE": ["Architecture & Planning", "Interior Design", "Building Design"],
-            "PHARMACY": ["Pharmaceuticals", "Clinical Research", "Healthcare"],
-            "LOGISTICS_SUPPLY_CHAIN": ["Logistics & Freight", "Supply Chain Management", "Warehousing"],
-            "HOSPITALITY": ["Hotels & Hospitality", "Tourism", "Customer Experience"]
+            "MARKETING": ["Digital Media & Advertising", "Brand Strategy", "E-Commerce"],
+            "HR": ["Human Resources", "Talent Management", "Staffing"],
+            "LEGAL": ["Legal Services", "Corporate Compliance", "Law Practice"],
+            "SCIENCE_RESEARCH": ["Scientific Research", "R&D Laboratories", "Academic Research"],
+            "ARCHITECTURE": ["Architecture & Planning", "Building Design", "Construction Consulting"]
         }
 
-        inferred_industries = industries_map.get(prof_domain, ["General Corporate", "Services", "Operations"])
+        inferred_industries = industries_map.get(prof_domain, ["General Industry", "Services", "Operations"])
+
+        # Extract tools & trade equipment
+        known_tools = [
+            "Multimeter", "Conduit Bender", "Wire Strippers", "Megohmmeter", "Circuit Tester",
+            "Pipe Wrench", "Soldering Torch", "Drain Snake", "PEX Crimper",
+            "MIG Welder", "TIG Welder", "Plasma Cutter", "Angle Grinder",
+            "OBD-II Scanner", "Torque Wrench", "Hydraulic Lift", "Brake Lathe",
+            "Manifold Gauges", "Vacuum Pump", "Refrigerant Scale", "Leak Detector",
+            "Forklift", "Pallet Jack", "RF Scanner", "Hand Truck",
+            "AutoCAD", "SolidWorks", "Tally", "QuickBooks", "Excel", "Photoshop", "VS Code"
+        ]
+        extracted_tools = [t for t in known_tools if any(t.lower() == str(sk).lower() for sk in tech_skills) or t.lower() in raw_text]
 
         return {
-            # Conceptual Required Profile Fields:
             "professional_domain": prof_domain,
             "professional_identity": prof_identity,
             "current_or_latest_role": current_or_latest_role,
             "previous_roles": previous_roles,
-            "experience_level": exp_level or "Fresher / Entry Level",
+            "experience_level": exp_level or "Experienced Professional",
             "years_of_experience": yrs_exp,
             "primary_roles": primary_roles,
             "related_roles": related_roles,
@@ -463,8 +578,14 @@ class RoleInferenceEngine:
             # Backward-Compatible Helper Attributes:
             "persona": prof_identity,
             "core_skills": list(tech_skills[:12]),
-            "inferred_roles": (primary_roles + related_roles)[:5],
-            "primary_search_keyword": clean_queries[0]
+            "inferred_roles": (primary_roles + related_roles)[:6],
+            "primary_search_keyword": clean_queries[0],
+
+            # Multi-Profession & Uncertainty Attributes (Tasks 2 & 7):
+            "confidence": confidence,
+            "is_ambiguous": is_ambiguous,
+            "needs_confirmation": needs_confirmation,
+            "alternative_professions": alternative_professions
         }
 
     @classmethod
@@ -476,10 +597,10 @@ class RoleInferenceEngine:
             "previous_roles": [],
             "experience_level": "Fresher",
             "years_of_experience": None,
-            "primary_roles": ["Professional Associate", "Executive"],
-            "related_roles": ["Operations Assistant"],
-            "alternative_roles": ["General Associate"],
-            "search_queries": ["Associate"],
+            "primary_roles": ["Professional Associate", "Operations Specialist"],
+            "related_roles": ["Service Coordinator", "General Associate"],
+            "alternative_roles": ["Project Assistant"],
+            "search_queries": ["Associate", "Coordinator"],
             "skills": [],
             "technical_skills": [],
             "soft_skills": [],
@@ -492,7 +613,10 @@ class RoleInferenceEngine:
             "languages": ["English"],
             "persona": "Professional Candidate",
             "core_skills": [],
-            "inferred_roles": ["Professional Associate", "Executive"],
-            "primary_search_keyword": "associate"
+            "inferred_roles": ["Professional Associate", "Operations Specialist"],
+            "primary_search_keyword": "associate",
+            "confidence": "LOW",
+            "is_ambiguous": True,
+            "needs_confirmation": True,
+            "alternative_professions": []
         }
-

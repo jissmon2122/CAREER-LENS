@@ -118,14 +118,14 @@ def get_recommended_jobs():
 
         # Target Role Resolution Priority:
         # 1. User-selected target role from UI query param
-        # 2. User profile preferred_job_role
-        # 3. Resume analysis primary_search_keyword / inferred_roles
+        # 2. Resume analysis primary_search_keyword / inferred_roles (candidate's actual parsed resume)
+        # 3. User profile preferred_job_role (only as fallback if resume has no inferred role)
         user_pref_role = (user_json.get('preferred_job_role') or '').strip()
         resume_primary_kw = (candidate_profile.get("primary_search_keyword") or '').strip()
         inferred_roles = candidate_profile.get("inferred_roles", [])
         first_inferred_role = inferred_roles[0].strip() if inferred_roles else ''
 
-        target_role = role_param or user_pref_role or resume_primary_kw or first_inferred_role
+        target_role = role_param or resume_primary_kw or first_inferred_role or user_pref_role
         if target_role:
             user_json['preferred_job_role'] = target_role
 
@@ -662,7 +662,9 @@ def get_recommended_jobs():
     except Exception as e:
         logger.exception(f"Unexpected error in get_recommended_jobs: {e}")
         try:
-            emergency_jobs = JobService.find_verified_jobs(target_role=request.args.get('role', '') or "Software Engineer", limit=15)
+            req_role = request.args.get('role', '').strip()
+            fallback_target = req_role or (candidate_profile.get("primary_search_keyword") if 'candidate_profile' in locals() and candidate_profile else "")
+            emergency_jobs = JobService.find_verified_jobs(target_role=fallback_target, limit=15)
             formatted_time = datetime.now(timezone.utc).strftime("%d %B %Y, %I:%M %p")
             return jsonify({
                 "success": True,

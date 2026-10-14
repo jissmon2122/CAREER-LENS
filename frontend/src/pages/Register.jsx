@@ -13,10 +13,10 @@ const Register = () => {
     email: '',
     password: '',
     confirm_password: '',
-    education: 'B.Tech / B.E.',
-    degree: 'Computer Science and Engineering',
-    preferred_job_role: 'Data Analyst',
-    preferred_location: 'Chennai',
+    education: 'Bachelor\'s Degree',
+    degree: '',
+    preferred_job_role: '',
+    preferred_location: '',
     experience_level: 'Fresher'
   });
 
@@ -195,21 +195,23 @@ const Register = () => {
               <div className="form-group">
                 <label className="form-label">Education Qualification</label>
                 <select name="education" className="form-select" value={formData.education} onChange={handleChange}>
-                  <option value="B.Tech / B.E.">B.Tech / B.E.</option>
-                  <option value="B.Sc / BCA">B.Sc / BCA</option>
-                  <option value="M.Tech / M.E.">M.Tech / M.E.</option>
-                  <option value="MCA / M.Sc">MCA / M.Sc</option>
+                  <option value="Trade Certificate / ITI">Trade Certificate / ITI / Apprenticeship</option>
+                  <option value="Vocational Diploma">Vocational / Technical Diploma</option>
+                  <option value="Associate Degree">Associate Degree (AAS / AS)</option>
+                  <option value="Bachelor's Degree">Bachelor's Degree (B.Sc / B.Tech / B.A / B.Com / BSN)</option>
+                  <option value="Master's Degree">Master's Degree (M.Sc / M.Tech / M.A / MBA / MSN)</option>
+                  <option value="High School / Secondary">High School / Secondary</option>
                   <option value="Other">Other</option>
                 </select>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Degree / Stream</label>
+                <label className="form-label">Degree / Field of Study</label>
                 <input
                   type="text"
                   name="degree"
                   className="form-input"
-                  placeholder="Computer Science and Engineering"
+                  placeholder="e.g. Electrical, Nursing, Mechanical, CS, Accounting"
                   value={formData.degree}
                   onChange={handleChange}
                 />
@@ -223,7 +225,7 @@ const Register = () => {
                   type="text"
                   name="preferred_job_role"
                   className="form-input"
-                  placeholder="e.g. Data Analyst, Frontend Dev"
+                  placeholder="e.g. Electrician, Nurse, Accountant, Welder, Developer"
                   value={formData.preferred_job_role}
                   onChange={handleChange}
                 />

@@ -10,7 +10,13 @@ class EligibilityService:
     UNKNOWN = "UNKNOWN"
 
     # Mandatory critical keywords that cannot be substituted semantically
-    MANDATORY_LICENSES = {"nursing license", "rn license", "bar admission", "cpa", "medical license", "pilot license"}
+    MANDATORY_LICENSES = {
+        "nursing license", "rn license", "bar admission", "cpa", "medical license", "pilot license",
+        "electrician license", "journeyman electrician", "master electrician",
+        "plumbing license", "journeyman plumber", "master plumber",
+        "cdl", "commercial driver license", "cdl-a",
+        "teaching license", "cna", "certified nursing assistant", "epa 608"
+    }
 
     @classmethod
     def evaluate_eligibility(cls, candidate_skills: list, job_required_skills: list, job_title: str = "") -> dict:

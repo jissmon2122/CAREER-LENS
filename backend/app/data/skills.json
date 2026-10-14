@@ -18,23 +18,62 @@
     "cloud_devops": [
       "AWS", "Azure", "Google Cloud", "GCP", "Docker", "Kubernetes", "Linux", "CI/CD", "Nginx", "Jenkins", "Terraform", "Ansible"
     ],
+    "skilled_trades_electrical": [
+      "Electrical Wiring", "Wiring", "Conduit Bending", "Conduit", "Circuit Breakers", "Switchgear", "Panel Boards", "Multimeter", "Schematics", "Blueprint Reading", "High Voltage", "Low Voltage", "Electrical Troubleshooting", "Cable Pulling", "Lighting Installation", "Transformers", "Motor Controls", "National Electrical Code (NEC)", "NEC", "Electrical Maintenance", "Industrial Electrical", "Residential Electrical", "Commercial Electrical", "Lockout/Tagout", "LOTO", "Apprenticeship", "Journeyman Electrician", "Master Electrician"
+    ],
+    "skilled_trades_plumbing": [
+      "Pipefitting", "Soldering", "Drainage", "PEX", "Copper Piping", "PVC Piping", "Fixture Installation", "Backflow Prevention", "Leak Detection", "Sewage Systems", "Water Heaters", "Pipe Threading", "Plumbing Code", "Rough-in Plumbing", "Hydro Jetting"
+    ],
+    "skilled_trades_welding": [
+      "MIG Welding", "TIG Welding", "Stick Welding", "SMAW", "GMAW", "GTAW", "Oxy-Fuel Cutting", "Arc Welding", "Metal Fabrication", "Fabrication", "Structural Welding", "Pipe Welding", "Grinding", "Torch Cutting", "Flux-Cored Arc Welding"
+    ],
+    "skilled_trades_mechanic": [
+      "Automotive Repair", "Engine Diagnostics", "Brake Systems", "Suspension", "Transmission Repair", "OBD-II", "Preventative Maintenance", "Wheel Alignment", "Tire Mounting", "Hydraulic Systems", "Diesel Engines", "Heavy Equipment Repair", "Auto Repair", "Small Engine Repair"
+    ],
+    "skilled_trades_hvac": [
+      "HVAC", "Refrigeration", "EPA 608", "Heat Pumps", "Ductwork", "Air Conditioning", "Compressors", "Thermostats", "Air Handlers", "Sheet Metal", "Ventilation", "Heating Systems", "Freon Recovery", "Furnaces"
+    ],
     "healthcare_nursing": [
-      "Patient Care", "Medication Administration", "IV Therapy", "Vital Signs", "Wound Dressing", "Clinical Nursing", "Pharma", "Anatomy", "Pharmacology", "Hospital Administration", "EHR", "EMR", "BLS", "ACLs", "Patient Triage"
+      "Patient Care", "Medication Administration", "IV Therapy", "Vital Signs", "Wound Dressing", "Clinical Nursing", "Pharma", "Anatomy", "Pharmacology", "Hospital Administration", "EHR", "EMR", "BLS", "ACLS", "Patient Triage", "Patient Assessment", "Infection Control", "Catheterization"
+    ],
+    "healthcare_support": [
+      "Caregiving", "Elderly Care", "Patient Hygiene", "Home Health Care", "Medical Records", "Phlebotomy", "Specimen Collection", "Medical Terminology", "Patient Mobility", "CNA", "Activities of Daily Living (ADLs)", "Assisted Living"
+    ],
+    "healthcare_medical_lab": [
+      "Medical Laboratory Technology", "Hematology", "Urinalysis", "Microscopy", "Clinical Chemistry", "Blood Banking", "Lab Safety", "Specimen Processing", "Reagent Preparation", "Quality Control"
     ],
     "accounting_finance": [
-      "Tally", "Tally Prime", "GST", "Bookkeeping", "Auditing", "Accounts Payable", "Accounts Receivable", "Taxation", "Financial Analysis", "Payroll", "Balance Sheet", "Cost Accounting", "QuickBooks", "SAP FI", "Financial Reporting", "TDS", "Tally ERP"
+      "Tally", "Tally Prime", "GST", "Bookkeeping", "Auditing", "Accounts Payable", "Accounts Receivable", "Taxation", "Financial Analysis", "Payroll", "Balance Sheet", "Cost Accounting", "QuickBooks", "SAP FI", "Financial Reporting", "TDS", "Tally ERP", "Invoicing", "Ledger Maintenance"
+    ],
+    "administration_office": [
+      "Office Administration", "Data Entry", "Executive Assistance", "Calendar Management", "Reception", "Filing", "Meeting Scheduling", "Document Preparation", "Billing", "Travel Coordination", "Secretarial Support", "Records Management"
+    ],
+    "education_teaching": [
+      "Lesson Planning", "Classroom Management", "Curriculum Development", "Pedagogy", "Academic Counseling", "Educational Assessment", "Student Evaluation", "E-learning", "Subject Teaching", "Instructional Design", "Special Education", "Tutoring", "Student Mentoring"
+    ],
+    "hospitality_culinary": [
+      "Food Preparation", "Culinary Arts", "Food Safety", "HACCP", "Menu Planning", "Line Cooking", "Baking", "Knife Skills", "Kitchen Sanitation", "Inventory Control", "Portion Control", "Guest Service", "Front Desk Operations", "Housekeeping", "Event Catering"
+    ],
+    "logistics_warehousing": [
+      "Forklift Operation", "Forklift", "Warehouse Management", "Order Picking", "Packing", "Shipping & Receiving", "Inventory Tracking", "Pallet Jack", "Material Handling", "Loading & Unloading", "RF Scanner", "Commercial Driving", "CDL", "Route Planning", "Dispatching", "Freight Handling"
+    ],
+    "construction_carpentry": [
+      "Carpentry", "Framing", "Drywall", "Roofing", "Masonry", "Concrete Pouring", "Painting", "Hand Tools", "Power Tools", "Scaffolding", "Heavy Equipment Operation", "Site Safety", "OSHA 10", "OSHA 30", "Building Codes"
+    ],
+    "agriculture_farming": [
+      "Crop Management", "Irrigation", "Tractor Operation", "Harvesting", "Soil Management", "Livestock Care", "Farm Equipment Maintenance", "Pest Management", "Fertilization"
+    ],
+    "retail_customer_service": [
+      "Customer Service", "Retail Sales", "Cashier", "Cash Handling", "POS Systems", "Merchandising", "Stocking", "Store Operations", "Customer Relations", "Product Demonstrations"
     ],
     "mechanical_engineering": [
-      "AutoCAD", "SolidWorks", "CATIA", "ANSYS", "Machining", "CNC", "CAD", "CAM", "HVAC", "Thermodynamics", "Hydraulics", "Manufacturing", "GD&T", "Finite Element Analysis", "Piping Design", "Mechanical Design"
+      "AutoCAD", "SolidWorks", "CATIA", "ANSYS", "Machining", "CNC", "CAD", "CAM", "Thermodynamics", "Hydraulics", "Manufacturing", "GD&T", "Finite Element Analysis", "Piping Design", "Mechanical Design"
     ],
     "civil_engineering": [
       "Revit", "STAAD Pro", "Quantity Surveying", "Site Inspection", "Building Design", "AutoCAD Civil", "Construction Management", "Surveying", "Structural Analysis", "Estimation", "Concrete Technology"
     ],
     "electrical_engineering": [
-      "MATLAB", "Simulink", "PLC", "SCADA", "Power Electronics", "Circuit Design", "Cadence", "PCB Design", "Microcontrollers", "Embedded Systems", "High Voltage", "Electrical Design", "Single Line Diagrams"
-    ],
-    "education_teaching": [
-      "Lesson Planning", "Classroom Management", "Curriculum Development", "Pedagogy", "Academic Counseling", "Educational Assessment", "Student Evaluation", "E-learning", "Subject Teaching"
+      "MATLAB", "Simulink", "PLC", "SCADA", "Power Electronics", "Circuit Design", "Cadence", "PCB Design", "Microcontrollers", "Embedded Systems", "Electrical Design", "Single Line Diagrams"
     ],
     "marketing": [
       "Digital Marketing", "SEO", "SEM", "Google Ads", "Social Media Marketing", "Content Marketing", "Copywriting", "Brand Management", "Google Analytics", "Email Marketing", "Lead Generation", "Market Research"
@@ -46,7 +85,7 @@
       "Photoshop", "Illustrator", "InDesign", "Figma", "UI Design", "UX Design", "Graphic Design", "Typography", "Wireframing", "Video Editing", "Premiere Pro", "After Effects", "Sketch"
     ],
     "hr_recruitment": [
-      "Talent Acquisition", "Recruitment", "Employee Relations", "Onboarding", "HRIS", "Performance Management", "Payroll", "Labor Laws", "HR Policies", "Sourcing"
+      "Talent Acquisition", "Recruitment", "Employee Relations", "Onboarding", "HRIS", "Performance Management", "Labor Laws", "HR Policies", "Sourcing"
     ],
     "legal_compliance": [
       "Legal Research", "Contract Drafting", "Compliance", "Corporate Law", "Litigation", "Intellectual Property", "Arbitration", "Legal Analysis"
@@ -59,7 +98,7 @@
     ]
   },
   "soft_skills": [
-    "Communication", "Leadership", "Teamwork", "Problem Solving", "Time Management", "Critical Thinking", "Adaptability", "Creativity", "Collaboration", "Presentation", "Work Ethic", "Emotional Intelligence", "Attention to Detail", "Analytical Thinking", "Negotiation", "Patient Empathy", "Classroom Engagement"
+    "Communication", "Leadership", "Teamwork", "Problem Solving", "Time Management", "Critical Thinking", "Adaptability", "Creativity", "Collaboration", "Presentation", "Work Ethic", "Emotional Intelligence", "Attention to Detail", "Analytical Thinking", "Negotiation", "Patient Empathy", "Classroom Engagement", "Safety Awareness", "Physical Stamina", "Customer Focus"
   ],
   "aliases": {
     "react.js": "React",
@@ -83,6 +122,15 @@
     "tally prime": "Tally",
     "tally erp": "Tally",
     "autocad civil": "AutoCAD",
-    "staad.pro": "STAAD Pro"
+    "staad.pro": "STAAD Pro",
+    "mig": "MIG Welding",
+    "tig": "TIG Welding",
+    "stick": "Stick Welding",
+    "hvac/r": "HVAC",
+    "forklift": "Forklift Operation",
+    "cna": "CNA",
+    "nec": "National Electrical Code (NEC)",
+    "cdl-a": "CDL",
+    "cdl-b": "CDL"
   }
 }

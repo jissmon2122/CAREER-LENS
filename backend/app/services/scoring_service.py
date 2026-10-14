@@ -6,12 +6,12 @@ class ScoringService:
         """Contact score out of 10."""
         score = 0
         if contact_info.get("email_present"):
-            score += 3
+            score += 4
         if contact_info.get("phone_present"):
-            score += 3
+            score += 4
         if contact_info.get("linkedin_present"):
             score += 2
-        if contact_info.get("github_present"):
+        elif contact_info.get("github_present"):
             score += 2
         return min(score, 10)
 
@@ -214,22 +214,25 @@ class ScoringService:
 
         # Contact Info
         if contact_info.get("email_present") and contact_info.get("phone_present"):
-            if contact_info.get("linkedin_present") and contact_info.get("github_present"):
-                strengths.append("Complete professional contact information and online profiles detected.")
+            if contact_info.get("linkedin_present"):
+                strengths.append("Complete professional contact information and online profile detected.")
             else:
                 strengths.append("Primary contact details (Email & Phone) detected.")
         
         if not contact_info.get("linkedin_present"):
             improvements.append("Consider adding a LinkedIn profile link to enhance recruiter visibility.")
-        if not contact_info.get("github_present") and tech_count > 0:
+
+        software_keywords = {"python", "javascript", "java", "c++", "c#", "html", "css", "react", "node", "sql", "git", "coding", "software", "frontend", "backend"}
+        is_software = any(any(sk in str(s).lower() for sk in software_keywords) for s in (technical_skills or []))
+        if not contact_info.get("github_present") and is_software:
             improvements.append("Consider adding a GitHub profile link to showcase your code repositories.")
 
         # Projects
         proj_count = len(projects or [])
         if proj_count >= 2:
-            strengths.append("Good technical project portfolio present.")
+            strengths.append("Good project or practical work portfolio present.")
         elif proj_count == 0:
-            improvements.append("Add 1–2 relevant technical projects demonstrating practical implementation.")
+            improvements.append("Add 1–2 relevant projects or practical work examples demonstrating hands-on domain experience.")
 
         # Certifications
         cert_count = len(certifications or [])

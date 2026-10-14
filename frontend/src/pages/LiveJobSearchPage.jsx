@@ -7,13 +7,36 @@ import LiveJobCard from '../components/LiveJobCard';
 import JobMatchModal from '../components/JobMatchModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 
-const STANDARD_ROLES = [
-  "Data Analyst",
+const MULTI_PROFESSION_ROLES = [
+  // Skilled Trades
+  "Electrician",
+  "Plumber",
+  "Welder",
+  "Automotive Technician",
+  "HVAC Technician",
+  "Carpenter",
+  // Healthcare
+  "Staff Nurse",
+  "Certified Nursing Assistant (CNA)",
+  "Medical Assistant",
+  "Caregiver",
+  // Education & Office Administration
+  "School Teacher",
+  "Tutor",
+  "Accountant",
+  "Administrative Assistant",
+  // Culinary, Logistics & Service
+  "Chef",
+  "Forklift Operator",
+  "Warehouse Associate",
+  "Commercial Driver (CDL)",
+  "Customer Service Representative",
+  // Engineering & Technical
+  "Mechanical Engineer",
+  "Civil Engineer",
+  "Electrical Engineer",
   "Software Engineer",
-  "Machine Learning Engineer",
-  "Data Scientist",
-  "Frontend Developer",
-  "Backend Developer",
+  "Data Analyst",
   "Full Stack Developer",
   "DevOps Engineer"
 ];
@@ -42,10 +65,18 @@ const LiveJobSearchPage = () => {
   const { selectedRole, location, remote, experience, minMatch, activeTab } = filters;
   const [selectedMatch, setSelectedMatch] = useState(null);
 
-  const availableRoles = Array.from(new Set([
-    ...(user?.preferred_job_role ? [user.preferred_job_role] : []),
+  const candidateRoles = [
+    candidateProfile?.target_role,
+    candidateProfile?.primary_search_keyword,
     ...(candidateProfile?.inferred_roles || []),
-    ...STANDARD_ROLES
+    ...(candidateProfile?.primary_roles || []),
+    ...(candidateProfile?.alternative_roles || [])
+  ].filter(Boolean);
+
+  const availableRoles = Array.from(new Set([
+    ...candidateRoles,
+    ...(user?.preferred_job_role ? [user.preferred_job_role] : []),
+    ...MULTI_PROFESSION_ROLES
   ].filter(Boolean)));
 
   // Initial load: fetch once on mount if liveJobsData is not already cached in context

@@ -20,10 +20,10 @@ const Dashboard = () => {
   const [editingProfile, setEditingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileForm, setProfileForm] = useState({
-    education: user?.education || 'B.Tech / B.E.',
-    degree: user?.degree || 'Computer Science and Engineering',
-    preferred_job_role: user?.preferred_job_role || 'Data Analyst',
-    preferred_location: user?.preferred_location || 'Chennai',
+    education: user?.education || "Bachelor's Degree",
+    degree: user?.degree || '',
+    preferred_job_role: user?.preferred_job_role || '',
+    preferred_location: user?.preferred_location || '',
     experience_level: user?.experience_level || 'Fresher',
   });
 
@@ -214,22 +214,24 @@ const Dashboard = () => {
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: '0.8rem' }}>Education</label>
                 <select name="education" className="form-select" value={profileForm.education} onChange={handleProfileChange}>
-                  <option value="B.Tech / B.E.">B.Tech / B.E.</option>
-                  <option value="B.Sc / BCA">B.Sc / BCA</option>
-                  <option value="M.Tech / M.E.">M.Tech / M.E.</option>
-                  <option value="MCA / M.Sc">MCA / M.Sc</option>
+                  <option value="Trade Certificate / ITI">Trade Certificate / ITI / Apprenticeship</option>
+                  <option value="Vocational Diploma">Vocational / Technical Diploma</option>
+                  <option value="Associate Degree">Associate Degree (AAS / AS)</option>
+                  <option value="Bachelor's Degree">Bachelor's Degree (B.Sc / B.Tech / B.A / B.Com / BSN)</option>
+                  <option value="Master's Degree">Master's Degree (M.Sc / M.Tech / M.A / MBA / MSN)</option>
+                  <option value="High School / Secondary">High School / Secondary</option>
                   <option value="Other">Other</option>
                 </select>
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '0.8rem' }}>Degree / Stream</label>
-                <input type="text" name="degree" className="form-input" value={profileForm.degree} onChange={handleProfileChange} />
+                <label className="form-label" style={{ fontSize: '0.8rem' }}>Degree / Field of Study</label>
+                <input type="text" name="degree" className="form-input" placeholder="e.g. Electrical, Nursing, Accounting, CS" value={profileForm.degree} onChange={handleProfileChange} />
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: '0.8rem' }}>Preferred Job Role</label>
-                <input type="text" name="preferred_job_role" className="form-input" value={profileForm.preferred_job_role} onChange={handleProfileChange} />
+                <input type="text" name="preferred_job_role" className="form-input" placeholder="e.g. Electrician, Staff Nurse, Accountant, Developer" value={profileForm.preferred_job_role} onChange={handleProfileChange} />
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
@@ -265,7 +267,7 @@ const Dashboard = () => {
               <div>
                 <div style={{ color: 'var(--text-subtle)', fontSize: '0.8rem', fontWeight: 600 }}>EDUCATION</div>
                 <div style={{ fontWeight: 600 }}>
-                  {user?.education ? `${user.education} (${user.degree || 'CSE'})` : <span style={{ color: 'var(--accent-pink)' }}>Not set — Click Edit Profile</span>}
+                  {user?.education ? `${user.education}${user.degree ? ` (${user.degree})` : ''}` : <span style={{ color: 'var(--accent-pink)' }}>Not set — Click Edit Profile</span>}
                 </div>
               </div>
               <div>
