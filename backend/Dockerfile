@@ -9,8 +9,8 @@ ENV PYTHONUNBUFFERED=1 \
 # Install essential system dependencies for OpenCV, PyMuPDF, and ONNX Runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
+    libgl1 \
+    libglib2.0-0t64 \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -33,4 +33,4 @@ RUN mkdir -p /app/uploads/resumes
 EXPOSE 5000
 
 # Run with Gunicorn WSGI server in production
-CMD ["gunicorn", "wsgi:app", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "120"]
+CMD ["gunicorn", "wsgi:app", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "120"]
