@@ -9,7 +9,7 @@ const getBaseURL = () => {
 
 const api = axios.create({
   baseURL: getBaseURL(),
-  timeout: 20000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -75,8 +75,20 @@ export const authAPI = {
     return response.data;
   },
   getMe: async () => {
-    const response = await api.get('/auth/me');
-    return response.data;
+    try {
+      const response = await api.get('/auth/me', { timeout: 35000 });
+      return response.data;
+    } catch (err) {
+      const status = err.response?.status;
+      const isTransient = !status || status >= 500 || err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'));
+      if (isTransient) {
+        // Retry once after 2 seconds to absorb container wake-up or transient network lag
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const retryResponse = await api.get('/auth/me', { timeout: 35000 });
+        return retryResponse.data;
+      }
+      throw err;
+    }
   },
 };
 

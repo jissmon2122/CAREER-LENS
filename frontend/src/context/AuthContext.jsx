@@ -12,23 +12,35 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
     const initAuth = async () => {
       if (token) {
         try {
           const res = await authAPI.getMe();
-          if (res.success && res.data.user) {
+          if (isMounted && res.success && res.data?.user) {
             setUser(res.data.user);
             localStorage.setItem('user', JSON.stringify(res.data.user));
           }
         } catch (err) {
-          console.error("Auth verification failed:", err);
-          logout();
+          // Only log out if backend explicitly returns HTTP 401 Unauthorized
+          if (err.response?.status === 401) {
+            console.warn("Authentication token invalid or expired. Logging out.");
+            if (isMounted) logout();
+          } else {
+            // Network error, container spin-up timeout, or 5xx: preserve cached local user
+            console.warn("Auth check encountered network/temporary issue; retaining session:", err.message || err);
+          }
         }
       }
-      setLoading(false);
+      if (isMounted) {
+        setLoading(false);
+      }
     };
 
     initAuth();
+    return () => {
+      isMounted = false;
+    };
   }, [token]);
 
   const login = (newToken, userData) => {

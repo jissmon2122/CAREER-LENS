@@ -132,15 +132,26 @@ class UserModel:
 
     @staticmethod
     def find_by_id(user_id):
-        """Find candidate by ObjectId string."""
+        """Find candidate by ObjectId string or string key."""
         user_id_str = str(user_id)
         coll = UserModel.get_collection()
         if coll is not None:
             try:
                 obj_id = ObjectId(user_id_str)
-                return coll.find_one({"_id": obj_id})
+                doc = coll.find_one({"_id": obj_id})
+                if doc:
+                    return doc
             except Exception:
-                return None
+                pass
+
+            # Fallback for mock IDs or string IDs
+            try:
+                doc = coll.find_one({"_id": user_id_str})
+                if doc:
+                    return doc
+            except Exception:
+                pass
+
         return UserModel._in_memory_users.get(user_id_str)
 
     @staticmethod

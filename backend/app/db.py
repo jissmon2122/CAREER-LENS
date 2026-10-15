@@ -27,6 +27,10 @@ class Database:
                 "serverSelectionTimeoutMS": 3000,
                 "connectTimeoutMS": 3000,
                 "socketTimeoutMS": 5000,
+                "maxIdleTimeMS": 45000,
+                "waitQueueTimeoutMS": 5000,
+                "retryWrites": True,
+                "retryReads": True,
             }
             if "mongodb+srv://" in mongo_uri or "ssl=true" in mongo_uri.lower() or "tls=true" in mongo_uri.lower():
                 try:
