@@ -26,7 +26,10 @@ _RECOMMENDATIONS_CACHE_TTL = 1800  # 30 minutes
 def clear_recommendations_cache(target_user_id=None):
     global _RECOMMENDATIONS_CACHE
     if target_user_id:
-        _RECOMMENDATIONS_CACHE = {k: v for k, v in _RECOMMENDATIONS_CACHE.items() if k[0] != str(target_user_id)}
+        target_uid_str = str(target_user_id)
+        keys_to_del = [k for k in list(_RECOMMENDATIONS_CACHE.keys()) if k[0] == target_uid_str]
+        for k in keys_to_del:
+            _RECOMMENDATIONS_CACHE.pop(k, None)
     else:
         _RECOMMENDATIONS_CACHE.clear()
 

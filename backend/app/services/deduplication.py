@@ -35,6 +35,7 @@ class DeduplicationAndCacheEngine:
         ttl_seconds = Config.JOB_CACHE_TTL
 
         processed_jobs = []
+        seen_processed_ids = set()
         batch_url_to_id = {}
         batch_comp_title_loc_to_id = {}
         bulk_ops = []
@@ -83,17 +84,22 @@ class DeduplicationAndCacheEngine:
             norm_company = company.lower().strip()
             app_url = str(raw_job.get("application_url", "")).strip()
 
-            # Fast In-Memory Preloaded Duplicate Check
+            # Fast Cross-Provider & Provider ID Preloaded Duplicate Check
             p_key = (provider, provider_job_id)
-            existing_doc = preloaded_docs.get(p_key) if provider_job_id else None
+            existing_doc = None
 
-            if not existing_doc and app_url:
+            # Priority 1: Match identical vacancy application URL across providers
+            if app_url:
                 if app_url in batch_url_to_id:
                     existing_doc = preloaded_docs.get(batch_url_to_id[app_url])
                 else:
                     existing_doc = preloaded_docs.get(app_url)
 
-            # Level 3 Duplicate Check only if still not found
+            # Priority 2: Match same provider & provider job ID
+            if not existing_doc and provider_job_id:
+                existing_doc = preloaded_docs.get(p_key)
+
+            # Priority 3: Match company, title, location
             if not existing_doc and norm_company and norm_title:
                 comp_key = (norm_company, norm_title, location)
                 if comp_key in batch_comp_title_loc_to_id:
@@ -144,11 +150,18 @@ class DeduplicationAndCacheEngine:
 
                 bulk_ops.append(UpdateOne({"_id": doc_id}, {"$set": update_fields}))
                 existing_doc.update(update_fields)
+                preloaded_docs[doc_id] = existing_doc
                 if app_url:
                     batch_url_to_id[app_url] = doc_id
+                    preloaded_docs[app_url] = existing_doc
                 if norm_company and norm_title:
                     batch_comp_title_loc_to_id[(norm_company, norm_title, location)] = doc_id
-                processed_jobs.append(cls._format_job_output(existing_doc))
+                    preloaded_docs[(norm_company, norm_title, location)] = existing_doc
+
+                doc_id_str = str(doc_id)
+                if doc_id_str not in seen_processed_ids:
+                    seen_processed_ids.add(doc_id_str)
+                    processed_jobs.append(cls._format_job_output(existing_doc))
 
             else:
                 # Insert New Normalized Job Document with pre-assigned ObjectId
@@ -195,10 +208,17 @@ class DeduplicationAndCacheEngine:
                     pending_embeddings.append((new_doc, clean_desc[:400]))
 
                 bulk_ops.append(InsertOne(new_doc))
+                preloaded_docs[new_id] = new_doc
+                if provider_job_id:
+                    preloaded_docs[p_key] = new_doc
                 if app_url:
                     batch_url_to_id[app_url] = new_id
+                    preloaded_docs[app_url] = new_doc
                 if norm_company and norm_title:
                     batch_comp_title_loc_to_id[(norm_company, norm_title, location)] = new_id
+                    preloaded_docs[(norm_company, norm_title, location)] = new_doc
+
+                seen_processed_ids.add(str(new_id))
                 processed_jobs.append(cls._format_job_output(new_doc))
 
         # Vectorized batch embedding generation (only if model is already loaded and ready in memory)

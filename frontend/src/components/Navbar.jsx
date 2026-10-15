@@ -3,7 +3,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const Navbar = () => {
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, isOffline, retryAuth } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -12,7 +12,16 @@ const Navbar = () => {
   };
 
   return (
-    <nav className="navbar">
+    <>
+      {isOffline && (
+        <div style={{ backgroundColor: '#fff3cd', color: '#856404', padding: '0.4rem 1rem', textAlign: 'center', fontSize: '0.82rem', borderBottom: '1px solid #ffeeba', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+          <span>⚠️ Server is connecting or temporarily unreachable. Cached session preserved.</span>
+          <button onClick={retryAuth} style={{ padding: '2px 8px', fontSize: '0.78rem', cursor: 'pointer', borderRadius: '4px', border: '1px solid #856404', background: '#fff' }}>
+            Retry Connection
+          </button>
+        </div>
+      )}
+      <nav className="navbar">
       <div className="container nav-wrapper">
         <Link to="/" className="brand-logo">
           <div className="logo-icon">
@@ -92,6 +101,7 @@ const Navbar = () => {
         </ul>
       </div>
     </nav>
+    </>
   );
 };
 

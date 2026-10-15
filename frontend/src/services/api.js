@@ -15,48 +15,108 @@ const api = axios.create({
   },
 });
 
-// Request Interceptor: Attach JWT Bearer Token
+// Request Interceptor: Attach JWT Bearer Token & Request Correlation ID
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Attach client trace ID if not already present
+    if (!config.headers['X-Request-ID']) {
+      config.headers['X-Request-ID'] = `cl_${Math.random().toString(36).substring(2, 10)}`;
+    }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Global Error Extraction
+// Response Interceptor: Global Error Handling & Safe Bounded Retries for GET Requests
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'))) {
+  async (error) => {
+    const config = error.config;
+
+    // Helper: Determine if error is a transient failure
+    const status = error.response?.status;
+    const isTimeout = error.code === 'ECONNABORTED' || (error.message && error.message.includes('timeout'));
+    const isNetworkError = !error.response && Boolean(error.request);
+    const isTransientStatus = status === 502 || status === 503 || status === 504 || status === 429;
+    const isTransient = isTimeout || isNetworkError || isTransientStatus;
+
+    // Only retry safe, idempotent GET requests to prevent duplicate side-effects
+    const isGetRequest = config && config.method && config.method.toLowerCase() === 'get';
+    const maxRetries = 2; // Bounded: maximum 2 retries (3 total attempts)
+
+    if (config && isGetRequest && isTransient) {
+      config._retryCount = config._retryCount || 0;
+
+      if (config._retryCount < maxRetries) {
+        config._retryCount += 1;
+
+        // Exponential backoff with jitter: 1s, 2s + 0-500ms jitter
+        let backoffDelay = Math.min(1000 * Math.pow(2, config._retryCount - 1) + Math.floor(Math.random() * 500), 5000);
+
+        // Respect standard Retry-After header on 429 Rate Limiting
+        if (status === 429) {
+          const retryAfterHeader = error.response?.headers?.['retry-after'];
+          if (retryAfterHeader) {
+            const parsed = parseInt(retryAfterHeader, 10);
+            if (!isNaN(parsed) && parsed > 0) {
+              backoffDelay = Math.min(parsed * 1000, 6000);
+            }
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+        return api(config);
+      }
+    }
+
+    // Standardize error message payloads for clean UI rendering
+    if (isTimeout) {
       if (!error.response) {
-        const reqUrl = error.config?.url || '';
+        const reqUrl = config?.url || '';
         let timeoutMsg = 'Request timed out. The server is taking longer than expected to respond. Please try again.';
         if (reqUrl.includes('/jobs/')) {
           timeoutMsg = 'Request timed out. Live search is taking longer than expected. Please retry or adjust filters.';
         } else if (reqUrl.includes('/auth/')) {
-          timeoutMsg = 'Authentication request timed out. Please check your connection and try again.';
+          timeoutMsg = 'Authentication request timed out. Please check your connection and retry.';
         }
         error.response = {
+          status: 408,
           data: {
             success: false,
-            message: timeoutMsg
+            message: timeoutMsg,
+            error: 'TIMEOUT'
           }
         };
       }
+    } else if (status === 429 && (!error.response.data || !error.response.data.message)) {
+      error.response.data = {
+        success: false,
+        message: 'Too many requests. Please wait a moment before trying again.',
+        error: 'RATE_LIMITED'
+      };
+    } else if (status === 503 && (!error.response.data || !error.response.data.message)) {
+      error.response.data = {
+        success: false,
+        message: 'The service is temporarily unavailable. Please try again shortly.',
+        error: 'SERVICE_UNAVAILABLE'
+      };
     }
+
+    // Token invalidation: Only on genuine HTTP 401 on protected (non-auth) routes
     if (error.response && error.response.status === 401) {
-      const isAuthRoute = error.config?.url?.includes('/auth/login') || 
-                          error.config?.url?.includes('/auth/register') || 
-                          error.config?.url?.includes('/auth/google');
+      const isAuthRoute = config?.url?.includes('/auth/login') || 
+                          config?.url?.includes('/auth/register') || 
+                          config?.url?.includes('/auth/google');
       if (!isAuthRoute) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
       }
     }
+
     return Promise.reject(error);
   }
 );
@@ -74,21 +134,9 @@ export const authAPI = {
     const response = await api.post('/auth/google', { credential });
     return response.data;
   },
-  getMe: async () => {
-    try {
-      const response = await api.get('/auth/me', { timeout: 35000 });
-      return response.data;
-    } catch (err) {
-      const status = err.response?.status;
-      const isTransient = !status || status >= 500 || err.code === 'ECONNABORTED' || (err.message && err.message.includes('timeout'));
-      if (isTransient) {
-        // Retry once after 2 seconds to absorb container wake-up or transient network lag
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        const retryResponse = await api.get('/auth/me', { timeout: 35000 });
-        return retryResponse.data;
-      }
-      throw err;
-    }
+  getMe: async (options = {}) => {
+    const response = await api.get('/auth/me', { timeout: 35000, ...options });
+    return response.data;
   },
 };
 

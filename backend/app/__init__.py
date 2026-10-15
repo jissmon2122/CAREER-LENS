@@ -19,8 +19,18 @@ def create_app():
         max_age=86400
     )
 
+    import time
+    import uuid
+
+    # Validate production configuration safely
+    for warn in Config.validate_production_env():
+        app.logger.warning(f"[CONFIG] {warn}")
+
     @app.before_request
-    def handle_cors_preflight():
+    def attach_request_context_and_cors():
+        request.request_id = request.headers.get('X-Request-ID') or f"req_{uuid.uuid4().hex[:10]}"
+        request._start_time = time.time()
+
         if request.method == "OPTIONS":
             response = app.make_default_options_response()
             origin = request.headers.get('Origin')
@@ -36,12 +46,16 @@ def create_app():
                     response.headers['Access-Control-Allow-Origin'] = origin
                     response.headers['Access-Control-Allow-Credentials'] = 'true'
                     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-                    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+                    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Request-ID'
                     response.headers['Access-Control-Max-Age'] = '86400'
             return response
 
     @app.after_request
-    def apply_cors_headers(response):
+    def apply_cors_and_logging(response):
+        req_id = getattr(request, 'request_id', '')
+        if req_id:
+            response.headers['X-Request-ID'] = req_id
+
         origin = request.headers.get('Origin')
         if origin:
             clean_origin = origin.strip().rstrip('/')
@@ -55,8 +69,14 @@ def create_app():
                 response.headers['Access-Control-Allow-Origin'] = origin
                 response.headers['Access-Control-Allow-Credentials'] = 'true'
                 response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Request-ID'
                 response.headers['Access-Control-Max-Age'] = '86400'
+
+        # Safe structured logging: records request ID, method, path, status, and duration (never sensitive payloads)
+        duration = round(time.time() - getattr(request, '_start_time', time.time()), 3)
+        if not request.path.startswith('/static'):
+            app.logger.info(f"[REQ {req_id}] {request.method} {request.path} -> {response.status_code} in {duration}s")
+
         return response
 
     # Initialize MongoDB connection
@@ -85,6 +105,32 @@ def create_app():
     app.register_blueprint(forecasting_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(ai_bp)
+
+    # Liveness Endpoints: Returns 200 immediately if process is alive
+    @app.route('/health/live', methods=['GET'])
+    @app.route('/api/health/live', methods=['GET'])
+    def liveness_check():
+        return jsonify({
+            "success": True,
+            "status": "live",
+            "service": "CareerLens Backend API"
+        }), 200
+
+    # Readiness Endpoints: Verifies required external dependencies (MongoDB connectivity)
+    @app.route('/health/ready', methods=['GET'])
+    @app.route('/api/health/ready', methods=['GET'])
+    def readiness_check():
+        from app.ai.embedding_service import embedding_service
+        is_db_connected = Database.is_connected()
+        status_code = 200 if is_db_connected else 503
+        return jsonify({
+            "success": is_db_connected,
+            "status": "ready" if is_db_connected else "not_ready",
+            "dependencies": {
+                "database": "connected" if is_db_connected else "disconnected",
+                "ai_available": embedding_service.is_available()
+            }
+        }), status_code
 
     # Base Health Check Routes (Root, /health, /api/health)
     @app.route('/', methods=['GET'])

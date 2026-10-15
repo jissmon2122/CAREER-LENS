@@ -108,4 +108,18 @@ class Config:
     INDIANAPI_RESULTS_LIMIT = int(os.getenv('INDIANAPI_RESULTS_LIMIT', '50'))
     INDIANAPI_TIMEOUT = int(os.getenv('INDIANAPI_TIMEOUT', '10'))
 
+    @classmethod
+    def validate_production_env(cls):
+        """Validate critical configuration variables safely without leaking secret values."""
+        warnings = []
+        is_production = cls.ENV == 'production' or os.getenv('RENDER') == 'true'
+        if is_production:
+            if not cls.SECRET_KEY or cls.SECRET_KEY == 'default_secret_key_change_me':
+                warnings.append("SECRET_KEY is using default placeholder in production.")
+            if not cls.JWT_SECRET_KEY or cls.JWT_SECRET_KEY == 'default_jwt_secret_key_change_me':
+                warnings.append("JWT_SECRET_KEY is using default placeholder in production.")
+            if not cls.MONGO_URI or 'localhost' in cls.MONGO_URI:
+                warnings.append("MONGO_URI appears to target a local database instead of production cluster.")
+        return warnings
+
 
