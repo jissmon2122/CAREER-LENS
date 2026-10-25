@@ -528,18 +528,17 @@ def get_recommended_jobs():
         recommended_jobs = [j for j in matched_job_cards if j.get("is_primary_recommendation")]
         other_opportunities = [j for j in matched_job_cards if not j.get("is_primary_recommendation")]
 
-        # If primary recommended is empty but other_opportunities exists, promote the top relevant opportunities
+        # If primary recommended is empty but other_opportunities exists, promote strictly relevant domain opportunities
         if not recommended_jobs and other_opportunities:
             promoted = [j for j in other_opportunities if j.get("role_relevance_status") in ["DIRECT_ROLE_MATCH", "RELATED_ROLE"]]
-            if not promoted:
-                promoted = sorted(other_opportunities, key=lambda x: x.get("match_score", 0), reverse=True)[:5]
-            for p_job in promoted:
-                p_job["is_primary_recommendation"] = True
-                if p_job.get("recommendation_status") in ["LOW_MATCH", "RELATED"]:
-                    p_job["recommendation_status"] = "RECOMMENDED"
-            recommended_jobs = promoted
-            promoted_ids = {p.get("_id") for p in promoted}
-            other_opportunities = [j for j in other_opportunities if j.get("_id") not in promoted_ids]
+            if promoted:
+                for p_job in promoted:
+                    p_job["is_primary_recommendation"] = True
+                    if p_job.get("recommendation_status") in ["LOW_MATCH", "RELATED"]:
+                        p_job["recommendation_status"] = "RECOMMENDED"
+                recommended_jobs = promoted
+                promoted_ids = {p.get("_id") for p in promoted}
+                other_opportunities = [j for j in other_opportunities if j.get("_id") not in promoted_ids]
 
         # Filter by minimum match threshold if passed by user
         if min_match_param:

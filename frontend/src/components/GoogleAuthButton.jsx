@@ -29,20 +29,26 @@ const GoogleAuthButton = ({ onSuccess, onError, disabled }) => {
     onSuccess: handleGoogleSuccess,
     onError: (err) => {
       console.error("Google Auth Error:", err);
-      onError && onError('Google OAuth Error 401 (invalid_client): OAuth client not found. Please use Email & Password sign-in below or set a valid VITE_GOOGLE_CLIENT_ID in frontend/.env.');
+      if (err?.error === 'popup_closed_by_user') {
+        onError && onError('Google sign-in was cancelled. Please try again or use email sign-in.');
+      } else if (err?.error === 'idpiframe_initialization_failed' || err?.error === 'invalid_client') {
+        onError && onError('Google OAuth Client ID is invalid or not registered for this origin. Please sign in with Email & Password.');
+      } else {
+        onError && onError('Google sign-in was cancelled or encountered an error. Please use Email & Password sign-in.');
+      }
     },
   });
 
   const handleClick = () => {
     if (isPlaceholder) {
-      onError && onError('Google OAuth Client ID is set to placeholder in .env. Please sign in using Email & Password below, or set your real Google Client ID in frontend/.env.');
+      onError && onError('Google Sign-In is not yet configured with a production Google Client ID. Please use Email & Password sign-in below, or configure VITE_GOOGLE_CLIENT_ID.');
       return;
     }
     try {
       loginWithGoogle();
     } catch (err) {
       console.error("Google Auth trigger error:", err);
-      onError && onError('Google OAuth Client ID error. Please use Email & Password sign-in below.');
+      onError && onError('Google authentication could not be started. Please use Email & Password sign-in below.');
     }
   };
 

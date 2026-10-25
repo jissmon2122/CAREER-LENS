@@ -5,8 +5,9 @@ logger = logging.getLogger(__name__)
 class RoleRelevanceService:
     """
     Universal Domain & Role Relevance Service.
-    Evaluates domain and role relevance between candidate profile (Healthcare, Accounting,
-    Mechanical, Education, Marketing, Civil, HR, Sales, Software/IT, etc.)
+    Evaluates domain and role relevance between candidate profile (AI/ML, Data Science,
+    Full Stack, Frontend, Backend, Cloud/DevOps, Cybersecurity, QA, Skilled Trades,
+    Healthcare, Accounting/Finance, Education, Marketing, Civil/Mechanical Engineering, HR, Sales, etc.)
     and job vacancy title/description.
     Classifies vacancies into:
       - DIRECT_ROLE_MATCH
@@ -17,160 +18,185 @@ class RoleRelevanceService:
     """
 
     DOMAIN_KEYWORDS = {
+        # AI & Machine Learning
+        "AI_ML": [
+            "ai engineer", "machine learning engineer", "ml engineer", "artificial intelligence",
+            "applied ai engineer", "generative ai engineer", "genai", "llm engineer",
+            "nlp engineer", "computer vision engineer", "mlops engineer", "deep learning engineer",
+            "research engineer", "ai research", "prompt engineer"
+        ],
+        # Data Science & Analytics
+        "DATA_SCIENCE_ANALYTICS": [
+            "data scientist", "junior data scientist", "data analyst", "junior data analyst",
+            "business intelligence analyst", "bi analyst", "bi developer", "business analyst",
+            "reporting analyst", "data engineer", "analytics engineer", "tableau developer",
+            "power bi developer", "data specialist"
+        ],
+        # Full Stack Development
+        "FULL_STACK_DEVELOPMENT": [
+            "full stack developer", "full stack engineer", "fullstack developer",
+            "mern stack developer", "mean stack developer", "react and node",
+            "java full stack developer", "python full stack developer", "full stack web developer"
+        ],
+        # Frontend Development
+        "FRONTEND_DEVELOPMENT": [
+            "frontend developer", "front end developer", "frontend engineer",
+            "react developer", "angular developer", "vue.js developer", "vue developer",
+            "ui engineer", "ui developer", "client side developer", "web developer"
+        ],
+        # Backend Development
+        "BACKEND_DEVELOPMENT": [
+            "backend developer", "back end developer", "backend engineer",
+            "python developer", "java developer", "node.js developer", "node developer",
+            "api developer", ".net developer", "c# developer", "php developer", "laravel developer",
+            "spring boot developer", "django developer"
+        ],
+        # Cloud & Infrastructure
+        "CLOUD_INFRASTRUCTURE": [
+            "devops engineer", "cloud engineer", "aws engineer", "azure engineer",
+            "gcp engineer", "platform engineer", "site reliability engineer", "sre",
+            "infrastructure engineer", "cloud solutions architect"
+        ],
+        # Cybersecurity
+        "CYBERSECURITY": [
+            "security analyst", "soc analyst", "cybersecurity analyst", "cyber security specialist",
+            "penetration tester", "pen tester", "ethical hacker", "security engineer",
+            "vulnerability analyst", "incident response analyst", "information security analyst"
+        ],
+        # QA & Testing
+        "QA_TESTING": [
+            "qa engineer", "software tester", "automation test engineer", "sdet",
+            "quality assurance engineer", "manual tester", "test automation engineer"
+        ],
+        # Software Development (General)
+        "SOFTWARE_DEVELOPMENT": [
+            "software engineer", "software developer", "application developer",
+            "junior software engineer", "graduate software engineer", "programmer"
+        ],
+        # Skilled Trades
         "SKILLED_TRADES_ELECTRICAL": [
             "electrician", "electrical technician", "wiring", "conduit", "journeyman electrician",
-            "master electrician", "electrical maintenance", "lineman", "wireman", "low voltage technician"
+            "master electrician", "electrical maintenance", "lineman", "wireman", "low voltage technician",
+            "industrial electrician", "commercial electrician", "residential electrician"
         ],
         "SKILLED_TRADES_PLUMBING": [
             "plumber", "plumbing", "pipefitter", "steamfitter", "drain cleaning",
-            "journeyman plumber", "master plumber", "piping"
+            "journeyman plumber", "master plumber", "piping technician"
         ],
         "SKILLED_TRADES_WELDING": [
             "welder", "welding", "fabricator", "mig welder", "tig welder", "arc welder",
-            "pipe welder", "structural welder"
+            "pipe welder", "structural welder", "metal fabricator"
         ],
         "SKILLED_TRADES_MECHANIC": [
             "automotive technician", "mechanic", "auto mechanic", "diesel mechanic",
-            "fleet mechanic", "heavy equipment mechanic", "service technician", "brake technician"
+            "fleet mechanic", "heavy equipment mechanic", "service technician", "brake technician",
+            "automotive mechanic", "maintenance technician"
         ],
         "SKILLED_TRADES_HVAC": [
             "hvac technician", "hvac", "refrigeration technician", "heating and cooling",
             "hvac installer", "air conditioning technician", "epa 608"
         ],
-        "HEALTHCARE_SUPPORT": [
-            "certified nursing assistant", "cna", "medical assistant", "caregiver", "home health aide",
-            "phlebotomist", "dental assistant", "physical therapy aide", "patient care technician"
-        ],
+        # Healthcare
         "HEALTHCARE_NURSING": [
             "registered nurse", "staff nurse", "clinical nurse", "icu nurse", "charge nurse",
-            "nurse practitioner", "triage nurse", "er nurse", "home health nurse"
+            "nurse practitioner", "triage nurse", "er nurse", "nurse", "nursing", "hospital nurse"
         ],
-        "HEALTHCARE": [
-            "nurse", "nursing", "clinical", "hospital", "patient care", "medical",
-            "doctor", "healthcare", "lab technician", "vital signs", "wound dressing"
+        "HEALTHCARE_SUPPORT": [
+            "certified nursing assistant", "cna", "medical assistant", "caregiver", "home health aide",
+            "phlebotomist", "dental assistant", "physical therapy aide", "patient care technician",
+            "medical laboratory technician", "mlt", "radiology technician", "x-ray technician",
+            "clinical assistant", "healthcare administrator"
         ],
+        # Accounting & Finance
         "ACCOUNTING_FINANCE": [
-            "accountant", "accounting", "tally", "gst", "bookkeeping", "auditing",
-            "accounts payable", "accounts receivable", "taxation", "finance executive",
-            "financial analyst", "payroll"
+            "accountant", "accounting", "tally", "gst", "bookkeeping", "bookkeeper", "auditing",
+            "auditor", "accounts payable", "accounts receivable", "taxation", "finance executive",
+            "financial analyst", "payroll specialist", "tax associate", "accounts executive"
         ],
-        "EDUCATION_TEACHING": [
-            "teacher", "teaching", "b.ed", "curriculum", "school teacher", "lecturer",
-            "tutor", "pedagogy", "academic counselor", "education coordinator", "elementary teacher", "high school teacher"
-        ],
+        # Education & Teaching
         "EDUCATION": [
-            "teacher", "teaching", "curriculum", "lecturer", "tutor", "pedagogy", "instructor"
+            "teacher", "teaching", "b.ed", "school teacher", "subject teacher", "lecturer",
+            "tutor", "pedagogy", "academic instructor", "trainer", "teaching assistant", "professor"
         ],
+        # Administration & Office
         "ADMINISTRATION_OFFICE": [
             "administrative assistant", "office assistant", "executive assistant", "receptionist",
-            "office administrator", "clerk", "data entry", "office manager"
+            "office administrator", "clerk", "data entry specialist", "office coordinator"
         ],
-        "HOSPITALITY_CULINARY": [
-            "chef", "cook", "line cook", "prep cook", "sous chef", "kitchen assistant",
-            "food preparation", "baker", "barista", "culinary"
+        # Human Resources
+        "HUMAN_RESOURCES": [
+            "human resources", "hr executive", "recruiter", "talent acquisition",
+            "hr generalist", "onboarding specialist", "hr coordinator"
         ],
-        "HOSPITALITY": [
-            "hospitality executive", "front desk officer", "guest relations", "hotel operations", "restaurant manager"
-        ],
-        "LOGISTICS_WAREHOUSE": [
-            "forklift operator", "warehouse associate", "warehouse worker", "material handler",
-            "order picker", "shipping and receiving", "truck driver", "delivery driver", "cdl driver", "logistics coordinator"
-        ],
-        "CONSTRUCTION_CARPENTRY": [
-            "carpenter", "carpentry", "framing carpenter", "construction worker",
-            "drywall installer", "mason", "masonry", "roofing", "general laborer"
-        ],
+        # Sales & Retail
         "SALES_RETAIL": [
-            "retail associate", "cashier", "store associate", "sales associate", "customer service representative"
+            "sales executive", "retail associate", "cashier", "store associate",
+            "sales representative", "customer service representative", "account executive", "inside sales"
         ],
-        "AGRICULTURE_FARMING": [
-            "farm worker", "agricultural worker", "farmhand", "greenhouse worker", "irrigation technician", "ranch hand"
+        # Marketing
+        "MARKETING": [
+            "marketing executive", "digital marketing specialist", "seo specialist",
+            "content marketer", "social media manager", "copywriter", "brand manager"
         ],
+        # Engineering
         "MECHANICAL_ENGINEERING": [
-            "mechanical engineer", "mechanical design", "autocad", "solidworks",
-            "catia", "ansys", "machining", "manufacturing engineer", "cad engineer",
-            "production engineer", "cnc"
+            "mechanical engineer", "mechanical design", "solidworks", "catia", "ansys",
+            "cad engineer", "production engineer", "manufacturing engineer"
         ],
         "CIVIL_ENGINEERING": [
             "civil engineer", "site engineer", "structural engineer", "construction engineer",
-            "revit", "staad pro", "quantity surveyor", "building design"
+            "quantity surveyor", "revit civil"
         ],
         "ELECTRICAL_ENGINEERING": [
-            "electrical engineer", "power engineer", "electrical design", "matlab",
-            "simulink", "plc", "scada", "power electronics", "circuit design"
+            "electrical engineer", "power engineer", "electrical design engineer",
+            "control systems engineer", "power systems"
         ],
-        "MARKETING": [
-            "marketing", "product marketing", "marketing lead", "digital marketing", "seo specialist", "marketing executive", "social media manager",
-            "content marketer", "copywriter", "brand manager", "lead generation", "google ads"
+        # Logistics & Warehouse
+        "LOGISTICS_WAREHOUSE": [
+            "forklift operator", "warehouse associate", "warehouse worker", "material handler",
+            "order picker", "shipping and receiving", "delivery driver", "truck driver", "logistics coordinator"
         ],
-        "HR": [
-            "human resources", "hr executive", "recruiter", "talent acquisition",
-            "hr generalist", "onboarding", "employee relations"
+        # Hospitality
+        "HOSPITALITY_CULINARY": [
+            "chef", "cook", "line cook", "prep cook", "sous chef", "kitchen assistant",
+            "baker", "culinary specialist", "food service worker"
         ],
-        "HUMAN_RESOURCES": [
-            "human resources", "hr executive", "recruiter", "talent acquisition", "hr generalist"
-        ],
-        "SALES": [
-            "sales", "sales manager", "sales executive", "business development", "account executive", "inside sales",
-            "field sales", "b2b sales", "sales representative", "client acquisition", "sales engineer"
-        ],
-        "SOFTWARE_IT": [
-            "software developer", "software engineer", "backend developer", "backend engineer",
-            "frontend developer", "frontend engineer", "full stack developer", "python developer",
-            "java developer", "c++ developer", "data scientist", "data analyst", "devops engineer",
-            "cloud engineer", "ai engineer", "web developer", "mobile developer"
-        ],
-        "DATA_ANALYTICS": [
-            "data analyst", "bi analyst", "business intelligence", "sql developer", "tableau", "power bi"
-        ],
-        "DESIGN": [
-            "graphic designer", "ui designer", "ux designer", "visual designer", "photoshop", "illustrator", "figma"
-        ],
-        "DESIGN_CREATIVE": [
-            "graphic designer", "ui designer", "ux designer", "visual designer", "photoshop", "illustrator", "figma"
-        ],
-        "LEGAL": [
-            "lawyer", "legal counsel", "legal associate", "advocate", "litigation", "corporate lawyer"
-        ],
-        "ARCHITECTURE": [
-            "architect", "architectural designer", "building designer", "bim architect"
-        ],
-        "PHARMACY": [
-            "pharmacist", "clinical pharmacist", "pharma executive", "drug safety associate"
-        ],
-        "LOGISTICS_SUPPLY_CHAIN": [
-            "supply chain", "logistics executive", "procurement associate", "inventory controller"
+        # Construction
+        "CONSTRUCTION_CARPENTRY": [
+            "carpenter", "carpentry", "framing carpenter", "drywall installer", "mason",
+            "construction worker", "construction laborer"
         ]
     }
 
     DOMAIN_GROUPS = {
+        "AI_ML": {"AI_ML", "DATA_SCIENCE_ANALYTICS"},
+        "DATA_SCIENCE_ANALYTICS": {"DATA_SCIENCE_ANALYTICS", "AI_ML"},
+        "FULL_STACK_DEVELOPMENT": {"FULL_STACK_DEVELOPMENT", "FRONTEND_DEVELOPMENT", "BACKEND_DEVELOPMENT", "SOFTWARE_DEVELOPMENT"},
+        "FRONTEND_DEVELOPMENT": {"FRONTEND_DEVELOPMENT", "FULL_STACK_DEVELOPMENT"},
+        "BACKEND_DEVELOPMENT": {"BACKEND_DEVELOPMENT", "FULL_STACK_DEVELOPMENT", "SOFTWARE_DEVELOPMENT"},
+        "CLOUD_INFRASTRUCTURE": {"CLOUD_INFRASTRUCTURE", "BACKEND_DEVELOPMENT"},
+        "CYBERSECURITY": {"CYBERSECURITY", "CLOUD_INFRASTRUCTURE"},
+        "QA_TESTING": {"QA_TESTING", "SOFTWARE_DEVELOPMENT"},
+        "SOFTWARE_DEVELOPMENT": {"SOFTWARE_DEVELOPMENT", "FULL_STACK_DEVELOPMENT", "BACKEND_DEVELOPMENT", "FRONTEND_DEVELOPMENT"},
         "SKILLED_TRADES_ELECTRICAL": {"SKILLED_TRADES_ELECTRICAL"},
         "SKILLED_TRADES_PLUMBING": {"SKILLED_TRADES_PLUMBING"},
         "SKILLED_TRADES_WELDING": {"SKILLED_TRADES_WELDING"},
         "SKILLED_TRADES_MECHANIC": {"SKILLED_TRADES_MECHANIC"},
         "SKILLED_TRADES_HVAC": {"SKILLED_TRADES_HVAC"},
-        "HEALTHCARE": {"HEALTHCARE", "HEALTHCARE_SUPPORT", "HEALTHCARE_NURSING", "PHARMACY"},
-        "HEALTHCARE_SUPPORT": {"HEALTHCARE", "HEALTHCARE_SUPPORT", "HEALTHCARE_NURSING"},
-        "HEALTHCARE_NURSING": {"HEALTHCARE", "HEALTHCARE_SUPPORT", "HEALTHCARE_NURSING"},
+        "HEALTHCARE_NURSING": {"HEALTHCARE_NURSING", "HEALTHCARE_SUPPORT"},
+        "HEALTHCARE_SUPPORT": {"HEALTHCARE_SUPPORT", "HEALTHCARE_NURSING"},
         "ACCOUNTING_FINANCE": {"ACCOUNTING_FINANCE"},
-        "EDUCATION": {"EDUCATION", "EDUCATION_TEACHING"},
-        "EDUCATION_TEACHING": {"EDUCATION", "EDUCATION_TEACHING"},
-        "ADMINISTRATION_OFFICE": {"ADMINISTRATION_OFFICE"},
-        "HOSPITALITY": {"HOSPITALITY", "HOSPITALITY_CULINARY"},
-        "HOSPITALITY_CULINARY": {"HOSPITALITY", "HOSPITALITY_CULINARY"},
-        "LOGISTICS_WAREHOUSE": {"LOGISTICS_WAREHOUSE", "LOGISTICS_SUPPLY_CHAIN"},
-        "LOGISTICS_SUPPLY_CHAIN": {"LOGISTICS_WAREHOUSE", "LOGISTICS_SUPPLY_CHAIN"},
+        "EDUCATION": {"EDUCATION"},
+        "ADMINISTRATION_OFFICE": {"ADMINISTRATION_OFFICE", "HUMAN_RESOURCES"},
+        "HUMAN_RESOURCES": {"HUMAN_RESOURCES", "ADMINISTRATION_OFFICE"},
+        "HOSPITALITY_CULINARY": {"HOSPITALITY_CULINARY"},
+        "LOGISTICS_WAREHOUSE": {"LOGISTICS_WAREHOUSE"},
         "CONSTRUCTION_CARPENTRY": {"CONSTRUCTION_CARPENTRY", "CIVIL_ENGINEERING"},
-        "SALES_RETAIL": {"SALES_RETAIL", "SALES", "MARKETING"},
-        "SALES": {"SALES_RETAIL", "SALES", "MARKETING"},
-        "AGRICULTURE_FARMING": {"AGRICULTURE_FARMING"},
+        "SALES_RETAIL": {"SALES_RETAIL", "MARKETING"},
+        "MARKETING": {"MARKETING", "SALES_RETAIL"},
         "MECHANICAL_ENGINEERING": {"MECHANICAL_ENGINEERING"},
         "CIVIL_ENGINEERING": {"CIVIL_ENGINEERING", "CONSTRUCTION_CARPENTRY"},
-        "ELECTRICAL_ENGINEERING": {"ELECTRICAL_ENGINEERING"},
-        "SOFTWARE_IT": {"SOFTWARE_IT", "DATA_ANALYTICS"},
-        "DATA_ANALYTICS": {"SOFTWARE_IT", "DATA_ANALYTICS"},
-        "HUMAN_RESOURCES": {"HUMAN_RESOURCES", "HR"},
-        "HR": {"HUMAN_RESOURCES", "HR"}
+        "ELECTRICAL_ENGINEERING": {"ELECTRICAL_ENGINEERING"}
     }
 
     @classmethod
@@ -259,7 +285,7 @@ class RoleRelevanceService:
                         "reason": eval_res["reason"]
                     }
 
-        # 3. Detect Job Domain
+        # 3. Detect Job Domain from Keywords
         detected_job_domain = None
         for dom_name, kw_list in cls.DOMAIN_KEYWORDS.items():
             for kw in kw_list:
@@ -271,23 +297,28 @@ class RoleRelevanceService:
 
         cand_domain = str(candidate_profile.get("professional_domain") or "GENERAL_PROFESSIONAL").upper().strip()
 
-        # Hard cross-domain check: prevent software jobs from being recommended to non-software profiles and vice-versa
-        non_software_domains = [
+        # Cross-Domain Isolation:
+        non_tech_domains = [
             "SKILLED_TRADES_ELECTRICAL", "SKILLED_TRADES_PLUMBING", "SKILLED_TRADES_WELDING",
-            "SKILLED_TRADES_MECHANIC", "SKILLED_TRADES_HVAC", "HEALTHCARE", "HEALTHCARE_SUPPORT",
-            "HEALTHCARE_NURSING", "EDUCATION", "EDUCATION_TEACHING", "ACCOUNTING_FINANCE",
-            "ADMINISTRATION_OFFICE", "HOSPITALITY", "HOSPITALITY_CULINARY", "LOGISTICS_WAREHOUSE",
-            "CONSTRUCTION_CARPENTRY", "AGRICULTURE_FARMING"
+            "SKILLED_TRADES_MECHANIC", "SKILLED_TRADES_HVAC", "HEALTHCARE_NURSING", "HEALTHCARE_SUPPORT",
+            "EDUCATION", "ACCOUNTING_FINANCE", "ADMINISTRATION_OFFICE", "HOSPITALITY_CULINARY",
+            "LOGISTICS_WAREHOUSE", "CONSTRUCTION_CARPENTRY", "SALES_RETAIL"
         ]
-        if cand_domain in non_software_domains and detected_job_domain in ["SOFTWARE_IT", "DATA_ANALYTICS"]:
+        tech_domains = [
+            "AI_ML", "DATA_SCIENCE_ANALYTICS", "FULL_STACK_DEVELOPMENT", "FRONTEND_DEVELOPMENT",
+            "BACKEND_DEVELOPMENT", "CLOUD_INFRASTRUCTURE", "CYBERSECURITY", "QA_TESTING",
+            "SOFTWARE_DEVELOPMENT"
+        ]
+
+        if cand_domain in non_tech_domains and detected_job_domain in tech_domains:
             return {
                 "eligible": False,
                 "role_relevance_status": "UNRELATED",
                 "detected_job_role": raw_title,
-                "reason": f"Software/IT vacancy is strictly unrelated to candidate's {cand_domain.title()} profile."
+                "reason": f"Technical software vacancy is strictly unrelated to candidate's {cand_domain.title()} profile."
             }
 
-        if cand_domain in ["SOFTWARE_IT", "DATA_ANALYTICS"] and detected_job_domain in non_software_domains:
+        if cand_domain in tech_domains and detected_job_domain in non_tech_domains:
             return {
                 "eligible": False,
                 "role_relevance_status": "UNRELATED",
@@ -295,8 +326,33 @@ class RoleRelevanceService:
                 "reason": f"Vacancy in {detected_job_domain.title()} is strictly unrelated to candidate's technical profile."
             }
 
+        # Specific isolation between Data Analyst and Accountant
+        if cand_domain == "ACCOUNTING_FINANCE" and detected_job_domain in ["DATA_SCIENCE_ANALYTICS", "AI_ML"]:
+            return {
+                "eligible": False,
+                "role_relevance_status": "UNRELATED",
+                "detected_job_role": raw_title,
+                "reason": "Data analytics role is not an accounting/finance position."
+            }
+        if cand_domain in ["DATA_SCIENCE_ANALYTICS", "AI_ML"] and detected_job_domain == "ACCOUNTING_FINANCE":
+            return {
+                "eligible": False,
+                "role_relevance_status": "UNRELATED",
+                "detected_job_role": raw_title,
+                "reason": "Accounting vacancy is not a data science or analytics position."
+            }
+
+        # Specific isolation between Electrician and Software
+        if cand_domain == "SKILLED_TRADES_ELECTRICAL" and detected_job_domain in tech_domains:
+            return {
+                "eligible": False,
+                "role_relevance_status": "UNRELATED",
+                "detected_job_role": raw_title,
+                "reason": "Software/IT vacancy is strictly unrelated to electrician profile."
+            }
+
         # 4. Domain Match Check: Candidate Domain vs Job Domain
-        if cand_domain in cls.DOMAIN_KEYWORDS and detected_job_domain:
+        if cand_domain in cls.DOMAIN_GROUPS and detected_job_domain:
             allowed_group = cls.DOMAIN_GROUPS.get(cand_domain, {cand_domain})
             if detected_job_domain in allowed_group:
                 return {
@@ -313,9 +369,9 @@ class RoleRelevanceService:
                     "reason": f"Vacancy in {detected_job_domain.title()} is unrelated to candidate's domain ({cand_domain.title()})."
                 }
 
-        # 5. Core skill overlap check only if within same general technical umbrella
+        # 5. Core skill overlap check only if within same general domain umbrella
         core_skills = [str(s).lower().strip() for s in candidate_profile.get("core_skills", []) if s]
-        matched_skills = [s for s in core_skills if s in searchable_job]
+        matched_skills = [s for s in core_skills if len(s) > 2 and s in searchable_job]
         if len(matched_skills) >= 2:
             return {
                 "eligible": True,
@@ -330,4 +386,3 @@ class RoleRelevanceService:
             "detected_job_role": raw_title,
             "reason": f"Vacancy '{raw_title}' does not match candidate target roles or professional domain."
         }
-

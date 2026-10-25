@@ -3,7 +3,7 @@ import functools
 import logging
 import time
 import jwt
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from google.oauth2 import id_token
 from google.auth.transport import requests
 
@@ -283,13 +283,16 @@ def login():
 def google_auth():
     """
     Authenticate candidate via Google OAuth credential token.
-    Verifies Google ID token signature & audience, creates or retrieves user, and returns application JWT.
+    Verifies Google ID token signature, issuer, audience, and expiration,
+    enforces email_verified claims, prevents account takeover,
+    creates or retrieves user, and returns application JWT.
     """
     if request.method == 'OPTIONS':
         return ('', 204)
 
+    t0 = time.time()
     data = request.get_json(silent=True) or {}
-    token = data.get('credential')
+    token = data.get('credential') or data.get('id_token') or data.get('token')
 
     if not token:
         return jsonify({
@@ -298,41 +301,114 @@ def google_auth():
             "error": "Missing credential"
         }), 400
 
+    # Verify Google OAuth configuration
+    client_id = Config.GOOGLE_CLIENT_ID
+    is_placeholder = not client_id or "your_google_oauth" in client_id
+    if is_placeholder and not current_app.config.get('TESTING'):
+        return jsonify({
+            "success": False,
+            "message": "Google OAuth is not configured on the server. Please set GOOGLE_CLIENT_ID in the server environment.",
+            "error": "GOOGLE_OAUTH_UNCONFIGURED"
+        }), 503
+
     try:
-        # Verify Google ID Token with Google Auth Library
-        # Note: If client_id is default placeholder during dev, we verify token signature without enforcing exact audience
-        client_id_to_check = Config.GOOGLE_CLIENT_ID if "your_google_oauth" not in Config.GOOGLE_CLIENT_ID else None
-        
-        id_info = id_token.verify_oauth2_token(
-            token,
-            requests.Request(),
-            audience=client_id_to_check
-        )
+        # Determine whether token is JWT (ID token) or OAuth2 Access Token
+        is_jwt = isinstance(token, str) and token.count('.') == 2
+        id_info = None
+
+        if is_jwt:
+            # Verify Google ID Token with Google Auth Library
+            client_id_to_check = None if (is_placeholder and current_app.config.get('TESTING')) else client_id
+            id_info = id_token.verify_oauth2_token(
+                token,
+                requests.Request(),
+                audience=client_id_to_check
+            )
+            # Verify issuer
+            issuer = id_info.get('iss')
+            if issuer not in ['accounts.google.com', 'https://accounts.google.com']:
+                return jsonify({
+                    "success": False,
+                    "message": "Invalid Google credential issuer.",
+                    "error": "INVALID_ISSUER"
+                }), 401
+        else:
+            # Verify OAuth2 Access Token against Google UserInfo API
+            import urllib.request
+            import urllib.error
+            import json as py_json
+            try:
+                userinfo_req = urllib.request.Request(
+                    'https://www.googleapis.com/oauth2/v3/userinfo',
+                    headers={'Authorization': f'Bearer {token}'}
+                )
+                with urllib.request.urlopen(userinfo_req, timeout=5) as u_res:
+                    if u_res.status == 200:
+                        id_info = py_json.loads(u_res.read().decode('utf-8'))
+                    else:
+                        raise ValueError("Userinfo returned non-200 status")
+            except Exception as e:
+                raise ValueError(f"Failed to verify Google access token: {e}")
+
+        if not id_info:
+            raise ValueError("Empty Google credential payload")
 
         google_id = id_info.get('sub')
-        email = id_info.get('email')
-        name = id_info.get('name') or email.split('@')[0]
+        email = (id_info.get('email') or '').lower().strip()
+        name = id_info.get('name') or (email.split('@')[0] if email else 'Google User')
         picture = id_info.get('picture')
 
-        if not email:
+        if not email or not google_id:
             return jsonify({
                 "success": False,
-                "message": "Unable to retrieve verified email from Google account",
-                "error": "Email missing"
+                "message": "Unable to retrieve verified email or identity from Google account",
+                "error": "Email or sub missing"
             }), 400
 
-        # Check existing user by email
-        existing_user = UserModel.find_by_email(email)
+        # Enforce verified email requirement
+        email_verified = id_info.get('email_verified')
+        is_verified = (email_verified is True) or (str(email_verified).lower() == 'true')
+        if not is_verified:
+            return jsonify({
+                "success": False,
+                "message": "Google account email is not verified. Please verify your email with Google or sign in using email and password.",
+                "error": "EMAIL_NOT_VERIFIED"
+            }), 400
 
-        if existing_user:
-            # Existing account with same email -> Log in seamlessly and update Google profile details
+        # Safe Account Linking and Takeover Prevention:
+        user_by_gid = UserModel.find_by_google_id(google_id)
+        user_by_email = UserModel.find_by_email(email)
+
+        # Hijacking Check 1: Google ID belongs to one user, but email matches a different user
+        if user_by_gid and user_by_email and str(user_by_gid.get("_id")) != str(user_by_email.get("_id")):
+            logger.warning(f"[AUTH GOOGLE CONFLICT] Cross-account conflict between google_id and email in {round(time.time() - t0, 3)}s")
+            return jsonify({
+                "success": False,
+                "message": "An account conflict occurred during Google authentication. Please sign in with email and password.",
+                "error": "ACCOUNT_LINKING_CONFLICT"
+            }), 409
+
+        if user_by_email:
+            # Hijacking Check 2: Email is already linked to a different Google account
+            existing_gid = user_by_email.get("google_id")
+            if existing_gid and str(existing_gid) != str(google_id):
+                logger.warning(f"[AUTH GOOGLE CONFLICT] Email already linked to different google_id in {round(time.time() - t0, 3)}s")
+                return jsonify({
+                    "success": False,
+                    "message": "This email address is already linked to a different Google account.",
+                    "error": "ACCOUNT_LINKING_CONFLICT"
+                }), 409
+
+            # Safely link Google info to existing user account
             user = UserModel.link_google_account(
-                user_id=existing_user.get("_id"),
+                user_id=user_by_email.get("_id"),
                 google_id=google_id,
                 picture=picture
-            ) or existing_user
+            ) or user_by_email
+        elif user_by_gid:
+            user = user_by_gid
         else:
-            # New Google user -> Create account
+            # New verified Google user -> Create account safely
             user = UserModel.create_google_user(
                 google_id=google_id,
                 email=email,
@@ -342,6 +418,8 @@ def google_auth():
 
         app_token = generate_app_jwt(user)
         user_json = UserModel.to_json(user)
+
+        logger.info(f"[AUTH GOOGLE SUCCESS] user_id='{user.get('_id')}' verified in {round(time.time() - t0, 3)}s")
 
         return jsonify({
             "success": True,
@@ -353,16 +431,18 @@ def google_auth():
         }), 200
 
     except ValueError as e:
+        logger.warning(f"[AUTH GOOGLE FAILED] Invalid token: {str(e)[:100]}")
         return jsonify({
             "success": False,
             "message": "Invalid Google credential token or token expired.",
             "error": str(e)
         }), 401
     except Exception as e:
+        logger.error(f"[AUTH GOOGLE ERROR] Unexpected error: {str(e)[:100]}")
         return jsonify({
             "success": False,
             "message": "An error occurred during Google authentication.",
-            "error": str(e)
+            "error": "INTERNAL_AUTH_ERROR"
         }), 500
 
 @auth_bp.route('/me', methods=['GET', 'OPTIONS'])

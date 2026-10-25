@@ -8,37 +8,138 @@ import JobMatchModal from '../components/JobMatchModal';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const MULTI_PROFESSION_ROLES = [
-  // Skilled Trades
+  // A. Artificial Intelligence & Machine Learning
+  "AI Engineer",
+  "Machine Learning Engineer",
+  "Applied AI Engineer",
+  "Generative AI Engineer",
+  "NLP Engineer",
+  "Computer Vision Engineer",
+  "MLOps Engineer",
+  "Research Engineer",
+
+  // B. Data Science & Analytics
+  "Data Scientist",
+  "Junior Data Scientist",
+  "Data Analyst",
+  "Business Intelligence Analyst",
+  "BI Developer",
+  "Business Analyst",
+  "Reporting Analyst",
+  "Data Engineer",
+  "Analytics Engineer",
+
+  // C. Software Development
+  "Software Developer",
+  "Software Engineer",
+  "Application Developer",
+  "Junior Software Engineer",
+  "Graduate Software Engineer",
+
+  // D. Full Stack Development
+  "Full Stack Developer",
+  "MERN Stack Developer",
+  "MEAN Stack Developer",
+  "React and Node.js Developer",
+  "Java Full Stack Developer",
+  "Python Full Stack Developer",
+
+  // E. Frontend Development
+  "Frontend Developer",
+  "React Developer",
+  "Angular Developer",
+  "Vue.js Developer",
+  "UI Engineer",
+
+  // F. Backend Development
+  "Backend Developer",
+  "Python Developer",
+  "Java Developer",
+  "Node.js Developer",
+  "API Developer",
+  ".NET Developer",
+  "PHP Developer",
+
+  // G. Cloud & Infrastructure
+  "DevOps Engineer",
+  "Cloud Engineer",
+  "AWS Engineer",
+  "Azure Engineer",
+  "Platform Engineer",
+  "Site Reliability Engineer",
+  "Infrastructure Engineer",
+
+  // H. Cybersecurity
+  "Security Analyst",
+  "SOC Analyst",
+  "Cybersecurity Analyst",
+  "Penetration Tester",
+  "Security Engineer",
+  "Vulnerability Analyst",
+  "Incident Response Analyst",
+
+  // I. Other Technology Roles
+  "QA Engineer",
+  "Software Tester",
+  "Automation Test Engineer",
+  "Database Administrator",
+  "Network Engineer",
+  "IT Support Engineer",
+  "Mobile App Developer",
+  "Embedded Systems Engineer",
+
+  // J. Skilled Trades
   "Electrician",
+  "Electrical Technician",
+  "Electrical Maintenance Technician",
+  "Industrial Electrician",
   "Plumber",
   "Welder",
-  "Automotive Technician",
   "HVAC Technician",
-  "Carpenter",
-  // Healthcare
+  "Mechanical Technician",
+  "Automotive Mechanic",
+  "Maintenance Technician",
+
+  // K. Healthcare
+  "Registered Nurse",
   "Staff Nurse",
-  "Certified Nursing Assistant (CNA)",
-  "Medical Assistant",
+  "Nursing Assistant",
   "Caregiver",
-  // Education & Office Administration
-  "School Teacher",
-  "Tutor",
+  "Medical Laboratory Technician",
+  "Radiology Technician",
+  "Clinical Assistant",
+  "Healthcare Administrator",
+
+  // L. Business & Finance
   "Accountant",
+  "Accounts Executive",
+  "Bookkeeper",
+  "Financial Analyst",
+  "Auditor",
+  "Tax Associate",
+  "Payroll Specialist",
+  "HR Executive",
+  "Recruiter",
   "Administrative Assistant",
-  // Culinary, Logistics & Service
+
+  // M. Education
+  "School Teacher",
+  "Subject Teacher",
+  "Tutor",
+  "Academic Instructor",
+  "Trainer",
+  "Teaching Assistant",
+
+  // N. Other Sectors
   "Chef",
   "Forklift Operator",
   "Warehouse Associate",
-  "Commercial Driver (CDL)",
-  "Customer Service Representative",
-  // Engineering & Technical
+  "Carpenter",
+  "Sales Executive",
+  "Digital Marketing Specialist",
   "Mechanical Engineer",
   "Civil Engineer",
-  "Electrical Engineer",
-  "Software Engineer",
-  "Data Analyst",
-  "Full Stack Developer",
-  "DevOps Engineer"
+  "Electrical Engineer"
 ];
 
 const LiveJobSearchPage = () => {
@@ -150,7 +251,7 @@ const LiveJobSearchPage = () => {
             Recommended Live Jobs For You
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '1.05rem', maxWidth: '800px' }}>
-            Personalized active job vacancies automatically retrieved and matched against your uploaded resume profile.
+            Personalized active job vacancies automatically retrieved and matched against your uploaded resume profile across all professions.
           </p>
         </div>
 
@@ -203,7 +304,7 @@ const LiveJobSearchPage = () => {
             Resume Upload Required
           </h2>
           <p style={{ color: 'var(--text-muted)', maxWidth: '600px', margin: '0 auto 2rem', fontSize: '1.05rem', lineHeight: '1.6' }}>
-            To generate personalized live job recommendations, the system needs to analyze your technical skills, experience, and domain from your resume.
+            To generate personalized live job recommendations, the system needs to analyze your skills, experience, and profession from your uploaded resume.
           </p>
           <button onClick={() => navigate('/resume-upload')} className="btn btn-primary" style={{ padding: '0.75rem 2rem', fontSize: '1rem', fontWeight: 700 }}>
             Upload & Analyze Resume Now ➔
@@ -211,6 +312,61 @@ const LiveJobSearchPage = () => {
         </div>
       ) : (
         <>
+          {/* Ambiguity / Multi-Discipline Callout Banner */}
+          {candidateProfile?.is_ambiguous && (
+            <div style={{
+              background: 'rgba(234, 179, 8, 0.1)',
+              border: '1px solid rgba(234, 179, 8, 0.35)',
+              borderRadius: 'var(--radius-md)',
+              padding: '1rem 1.25rem',
+              marginBottom: '1.5rem',
+              color: '#fef08a'
+            }}>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>🎯 Multi-Discipline Profile Detected:</span>
+                <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+                  Your resume demonstrates competencies across multiple domains. Select your target domain below to refine live recommendations:
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
+                {candidateProfile.primary_roles?.slice(0, 3).map(role => (
+                  <button
+                    key={role}
+                    onClick={() => handleFilterChange('selectedRole', role)}
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.3rem 0.75rem',
+                      border: selectedRole === role ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.2)',
+                      background: selectedRole === role ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255,255,255,0.05)',
+                      color: selectedRole === role ? '#fff' : 'var(--text-main)',
+                      fontWeight: 600
+                    }}
+                  >
+                    🎯 Focus: {role}
+                  </button>
+                ))}
+                {candidateProfile.alternative_professions?.map(alt => (
+                  <button
+                    key={alt.primary_role}
+                    onClick={() => handleFilterChange('selectedRole', alt.primary_role)}
+                    className="btn btn-secondary"
+                    style={{
+                      fontSize: '0.8rem',
+                      padding: '0.3rem 0.75rem',
+                      border: selectedRole === alt.primary_role ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.2)',
+                      background: selectedRole === alt.primary_role ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255,255,255,0.05)',
+                      color: selectedRole === alt.primary_role ? '#fff' : 'var(--text-main)',
+                      fontWeight: 600
+                    }}
+                  >
+                    🌟 Explore: {alt.primary_role}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Candidate Profile Summary Banner */}
           {candidateProfile && (
             <div className="glass-card" style={{ marginBottom: '1.75rem', padding: '1.5rem', background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(6,182,212,0.08))', border: '1px solid rgba(99,102,241,0.2)' }}>
@@ -236,7 +392,7 @@ const LiveJobSearchPage = () => {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '1rem' }}>
                 <div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem' }}>
-                    Extracted Core Technical Skills
+                    Extracted Core Professional Skills
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                     {candidateProfile.core_skills?.map(sk => (
@@ -249,13 +405,27 @@ const LiveJobSearchPage = () => {
 
                 <div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem' }}>
-                    Auto-Searched Target Roles
+                    Inferred Target Roles (Click to focus search)
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                     {candidateProfile.inferred_roles?.map(r => (
-                      <span key={r} style={{ background: 'rgba(6, 182, 212, 0.15)', color: 'var(--accent-cyan)', padding: '0.2rem 0.55rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 600 }}>
+                      <button
+                        key={r}
+                        onClick={() => handleFilterChange('selectedRole', r)}
+                        style={{
+                          background: selectedRole === r ? 'var(--accent-cyan)' : 'rgba(6, 182, 212, 0.15)',
+                          color: selectedRole === r ? '#000' : 'var(--accent-cyan)',
+                          border: 'none',
+                          padding: '0.2rem 0.55rem',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                        title={`Filter search for ${r}`}
+                      >
                         🔍 {r}
-                      </span>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -273,9 +443,9 @@ const LiveJobSearchPage = () => {
               {selectedRole && (
                 <button
                   onClick={() => handleFilterChange('selectedRole', '')}
-                  style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', fontSize: '0.75rem', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
                 >
-                  (Reset Role)
+                  (Reset Role Filter)
                 </button>
               )}
             </div>
@@ -285,7 +455,7 @@ const LiveJobSearchPage = () => {
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label" style={{ fontSize: '0.8rem' }}>Filter by Target Role</label>
                 <select className="form-select" value={selectedRole} onChange={(e) => handleFilterChange('selectedRole', e.target.value)}>
-                  <option value="">All Relevant Roles</option>
+                  <option value="">All Profile Matching Roles</option>
                   {availableRoles.map(r => (
                     <option key={r} value={r}>{r}</option>
                   ))}
@@ -298,7 +468,7 @@ const LiveJobSearchPage = () => {
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="e.g. India, Bengaluru, Remote..."
+                  placeholder="e.g. India, Remote, Worldwide..."
                   value={location}
                   onChange={(e) => handleFilterChange('location', e.target.value)}
                 />

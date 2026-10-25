@@ -106,6 +106,7 @@ class UserModel:
         user_doc = UserModel._in_memory_users.get(user_id_str)
         if user_doc:
             user_doc.update(update_fields)
+            UserModel._in_memory_users[f"google_{google_id}"] = user_doc
         return user_doc
 
     @staticmethod
@@ -180,6 +181,7 @@ class UserModel:
         user_doc = UserModel._in_memory_users.get(user_id_str)
         if user_doc:
             user_doc.update(update_fields)
+            UserModel._in_memory_users[f"google_{google_id}"] = user_doc
         return user_doc
 
     @staticmethod
