@@ -58,7 +58,8 @@ class Config:
     FRONTEND_URL = (os.getenv('FRONTEND_URL') or 'https://careerlens-iota.vercel.app').strip().rstrip('/')
     
     # Google OAuth Configuration
-    GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', 'your_google_oauth_client_id.apps.googleusercontent.com')
+    GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '850671362054-0c4o290uhegfo3cbtlfd8u4mnjbkjk3d.apps.googleusercontent.com')
+    GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
     
     # Database Configuration
     MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/career_intelligence')
