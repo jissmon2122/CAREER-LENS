@@ -96,6 +96,7 @@ def create_app():
     from app.routes.forecasting import forecasting_bp
     from app.routes.admin import admin_bp
     from app.routes.ai import ai_bp
+    from app.routes.salary import salary_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(resume_bp)
@@ -105,6 +106,7 @@ def create_app():
     app.register_blueprint(forecasting_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(ai_bp)
+    app.register_blueprint(salary_bp)
 
     # Liveness Endpoints: Returns 200 immediately if process is alive
     @app.route('/health/live', methods=['GET'])

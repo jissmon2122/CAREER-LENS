@@ -250,4 +250,27 @@ export const aiAPI = {
   },
 };
 
+export const salaryAPI = {
+  getRoles: async () => {
+    const response = await api.get('/salary/roles');
+    return response.data;
+  },
+  getLocations: async () => {
+    const response = await api.get('/salary/locations');
+    return response.data;
+  },
+  predictSalary: async (payload) => {
+    const response = await api.post('/salary/predict', payload);
+    return response.data;
+  },
+  getMarketOverview: async (role, country = 'IN') => {
+    const response = await api.get(`/salary/market?role=${encodeURIComponent(role)}&country=${encodeURIComponent(country)}`);
+    return response.data;
+  },
+  getAutofillProfile: async () => {
+    const response = await api.get('/salary/autofill');
+    return response.data;
+  },
+};
+
 export default api;

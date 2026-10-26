@@ -15,6 +15,7 @@ import SkillGapPage from './pages/SkillGapPage';
 import LearningRoadmapPage from './pages/LearningRoadmapPage';
 import SkillDemandPage from './pages/SkillDemandPage';
 import LiveJobSearchPage from './pages/LiveJobSearchPage';
+import SalaryPredictionPage from './pages/SalaryPredictionPage';
 
 function App() {
   return (
@@ -80,6 +81,13 @@ function App() {
                   <ProtectedRoute>
                     <SkillDemandPage />
                   </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/salary"
+                element={
+                  <SalaryPredictionPage />
                 }
               />
 

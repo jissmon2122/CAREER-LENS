@@ -59,6 +59,11 @@ const Navbar = () => {
                 </NavLink>
               </li>
               <li>
+                <NavLink to="/salary" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+                  Salary Predictor
+                </NavLink>
+              </li>
+              <li>
                 <NavLink to="/dashboard/skill-demand" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
                   Skill Demand
                 </NavLink>
