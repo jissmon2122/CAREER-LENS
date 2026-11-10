@@ -17,9 +17,11 @@ logger = logging.getLogger(__name__)
 
 salary_bp = Blueprint("salary", __name__, url_prefix="/api/salary")
 
-@salary_bp.route("/roles", methods=["GET"])
+@salary_bp.route("/roles", methods=["GET", "OPTIONS"])
 def get_roles():
     """Return all supported canonical roles and domain groupings."""
+    if request.method == "OPTIONS":
+        return ('', 204)
     try:
         data = SalaryService.get_supported_roles()
         return jsonify({"success": True, **data}), 200
@@ -27,9 +29,11 @@ def get_roles():
         logger.error("Error retrieving salary roles: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
-@salary_bp.route("/locations", methods=["GET"])
+@salary_bp.route("/locations", methods=["GET", "OPTIONS"])
 def get_locations():
     """Return supported countries, currencies, and cities."""
+    if request.method == "OPTIONS":
+        return ('', 204)
     try:
         data = SalaryService.get_supported_locations()
         return jsonify({"success": True, **data}), 200
@@ -37,7 +41,7 @@ def get_locations():
         logger.error("Error retrieving salary locations: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
-@salary_bp.route("/predict", methods=["POST"])
+@salary_bp.route("/predict", methods=["POST", "OPTIONS"])
 def predict():
     """
     Generate comprehensive salary prediction based on professional profile inputs.
@@ -54,6 +58,8 @@ def predict():
       "company_type": "standard"
     }
     """
+    if request.method == "OPTIONS":
+        return ('', 204)
     try:
         payload = request.get_json(silent=True) or {}
         role = payload.get("role") or payload.get("job_title") or payload.get("profession")
@@ -88,7 +94,7 @@ def predict():
         logger.error("Error generating salary prediction: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
-@salary_bp.route("/market", methods=["GET"])
+@salary_bp.route("/market", methods=["GET", "OPTIONS"])
 def market():
     """
     Return labor market benchmark overview for a role across experience tiers.
@@ -96,6 +102,8 @@ def market():
     - role: "Data Scientist" (required)
     - country: "US" (default: "IN")
     """
+    if request.method == "OPTIONS":
+        return ('', 204)
     try:
         role = request.args.get("role", "").strip()
         if not role:
@@ -108,12 +116,14 @@ def market():
         logger.error("Error retrieving market overview: %s", e)
         return jsonify({"success": False, "error": str(e)}), 500
 
-@salary_bp.route("/autofill", methods=["GET"])
+@salary_bp.route("/autofill", methods=["GET", "OPTIONS"])
 @jwt_required
 def autofill():
     """
     Extract profile parameters from the authenticated user's latest parsed resume.
     """
+    if request.method == "OPTIONS":
+        return ('', 204)
     try:
         current_user = getattr(request, "current_user", {})
         user_id = str(current_user.get("_id") or current_user.get("user_id") or "")
