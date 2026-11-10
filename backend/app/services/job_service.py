@@ -45,12 +45,45 @@ class JobService:
 
     @classmethod
     def get_job_by_id(cls, job_id):
-        """Retrieve a specific job profile by job_id (e.g. 'JOB001' or BSON ObjectId string)."""
-        all_jobs = cls.get_all_jobs()
-        job_id_str = str(job_id)
+        """Retrieve a specific job profile by job_id, MongoDB ObjectId string, or provider_job_id."""
+        if not job_id:
+            return None
 
+        job_id_str = str(job_id).strip()
+        coll = JobModel.get_collection()
+
+        if coll is not None:
+            from bson import ObjectId
+            # 1. Query by job_id field
+            doc = coll.find_one({"job_id": job_id_str})
+
+            # 2. Query by _id if valid ObjectId
+            if not doc and ObjectId.is_valid(job_id_str):
+                try:
+                    doc = coll.find_one({"_id": ObjectId(job_id_str)})
+                except Exception:
+                    pass
+
+            # 3. Query by provider_job_id
+            if not doc:
+                doc = coll.find_one({"provider_job_id": job_id_str})
+
+            # 4. Query by id as string
+            if not doc:
+                doc = coll.find_one({"id": job_id_str})
+
+            if doc:
+                return cls._format_job_dict(doc)
+
+        # 5. Fallback to cached / sample jobs
+        all_jobs = cls.get_all_jobs()
         for job in all_jobs:
-            if str(job.get("job_id")) == job_id_str or str(job.get("id")) == job_id_str:
+            if (
+                str(job.get("job_id", "")).lower() == job_id_str.lower()
+                or str(job.get("id", "")).lower() == job_id_str.lower()
+                or str(job.get("_id", "")).lower() == job_id_str.lower()
+                or str(job.get("provider_job_id", "")).lower() == job_id_str.lower()
+            ):
                 return job
         return None
 
@@ -226,32 +259,57 @@ class JobService:
     @classmethod
     def _format_job_dict(cls, doc):
         """Format a MongoDB job document into a structured job profile."""
-        job_id = str(doc.get("_id", doc.get("job_id", "")))
-        title = doc.get("title", doc.get("job_title", ""))
-        skills = doc.get("skills", [])
-        if isinstance(skills, str):
-            skills = [s.strip() for s in skills.split("|") if s.strip()]
+        doc_id = str(doc.get("_id", ""))
+        custom_job_id = doc.get("job_id") or doc.get("id") or doc_id
+        title = doc.get("title") or doc.get("job_title") or "Professional Role"
+
+        # Extract skills - handle lists, pipe-separated strings, and descriptions
+        raw_req = doc.get("required_skills") or doc.get("skills") or []
+        if isinstance(raw_req, str):
+            raw_req = [s.strip() for s in raw_req.split("|") if s.strip()]
+
+        clean_desc = doc.get("clean_description") or doc.get("description") or doc.get("raw_description") or ""
+        if not raw_req and clean_desc:
+            extracted = ExtractionService.extract_skills(clean_desc)
+            raw_req = extracted.get("technical_skills", [])
 
         aliases = ExtractionService.get_skills_dictionary().get("aliases", {})
-        normalized = [aliases.get(s.lower(), s) for s in skills]
+        normalized_req = [aliases.get(s.lower(), s) for s in raw_req]
 
-        split_idx = max(1, int(len(normalized) * 0.7)) if len(normalized) > 1 else len(normalized)
+        raw_pref = doc.get("preferred_skills") or []
+        if isinstance(raw_pref, str):
+            raw_pref = [s.strip() for s in raw_pref.split("|") if s.strip()]
+        normalized_pref = [aliases.get(s.lower(), s) for s in raw_pref]
+
+        if not normalized_pref and len(normalized_req) > 1:
+            split_idx = max(1, int(len(normalized_req) * 0.7))
+            required_skills = normalized_req[:split_idx]
+            preferred_skills = normalized_req[split_idx:]
+        else:
+            required_skills = normalized_req
+            preferred_skills = normalized_pref
+
+        all_skills = list(dict.fromkeys(required_skills + preferred_skills))
 
         return {
-            "id": job_id,
-            "job_id": job_id,
+            "_id": doc_id,
+            "id": custom_job_id,
+            "job_id": custom_job_id,
+            "provider_job_id": doc.get("provider_job_id", ""),
             "job_title": title,
-            "company": doc.get("company", ""),
-            "location": doc.get("location", ""),
-            "salary_min": int(doc.get("salary_min", 0)),
-            "salary_max": int(doc.get("salary_max", 0)),
-            "job_description": doc.get("description", doc.get("job_description", "")),
-            "required_skills": normalized[:split_idx],
-            "preferred_skills": normalized[split_idx:],
-            "all_skills": normalized,
-            "experience_required": doc.get("experience_required", doc.get("experience", "Fresher")),
-            "education_required": "Bachelor's Degree / B.Tech / BCA",
-            "job_role_category": title,
+            "title": title,
+            "company": (doc.get("company") or doc.get("company_name") or "Verified Hiring Organization").strip(),
+            "location": doc.get("location", "Remote / Hybrid"),
+            "salary_min": int(doc.get("salary_min", 0) or 0),
+            "salary_max": int(doc.get("salary_max", 0) or 0),
+            "job_description": clean_desc,
+            "clean_description": clean_desc,
+            "required_skills": required_skills,
+            "preferred_skills": preferred_skills,
+            "all_skills": all_skills,
+            "experience_required": doc.get("experience_level") or doc.get("experience_required") or doc.get("experience", "Fresher"),
+            "education_required": doc.get("education_required", "Bachelor's Degree / B.Tech / BCA"),
+            "job_role_category": doc.get("job_role_category", title),
             "industry": doc.get("industry", "IT"),
-            "posted_date": str(doc.get("posted_date", ""))
+            "posted_date": str(doc.get("posted_at") or doc.get("posted_date", ""))
         }
