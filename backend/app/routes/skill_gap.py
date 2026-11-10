@@ -12,13 +12,15 @@ from app.services.learning_roadmap import LearningRoadmapEngine
 
 skill_gap_bp = Blueprint('skill_gap', __name__, url_prefix='/api/skills')
 
-@skill_gap_bp.route('/gap/<job_id>', methods=['GET'])
+@skill_gap_bp.route('/gap/<job_id>', methods=['GET', 'OPTIONS'])
 @jwt_required
 def get_skill_gap(job_id):
     """
     Calculate & return detailed Skill Gap Analysis for candidate against target job.
     Includes validation guard.
     """
+    if request.method == 'OPTIONS':
+        return ('', 204)
     user = getattr(request, 'current_user', None)
     user_id = str(user.get("_id", user.get("id")))
 
@@ -73,12 +75,14 @@ def get_skill_gap(job_id):
         }
     }), 200
 
-@skill_gap_bp.route('/roadmap/<job_id>', methods=['GET'])
+@skill_gap_bp.route('/roadmap/<job_id>', methods=['GET', 'OPTIONS'])
 @jwt_required
 def get_learning_roadmap(job_id):
     """
     Generate personalized learning roadmap, certification recommendations, and match simulation.
     """
+    if request.method == 'OPTIONS':
+        return ('', 204)
     user = getattr(request, 'current_user', None)
     user_id = str(user.get("_id", user.get("id")))
 

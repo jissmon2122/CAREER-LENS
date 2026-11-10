@@ -111,9 +111,11 @@ def _generate_all_forecasts(force_refresh=False):
     _ALL_FORECASTS_CACHE = {"timestamp": now_ts, "data": forecasts}
     return forecasts
 
-@forecasting_bp.route('/top-skills', methods=['GET'])
+@forecasting_bp.route('/top-skills', methods=['GET', 'OPTIONS'])
 def get_top_skills():
     """Get top rising, stable, declining, and emerging skills."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
     forecasts = _generate_all_forecasts()
     all_list = list(forecasts.values())
 
@@ -132,9 +134,11 @@ def get_top_skills():
         }
     }), 200
 
-@forecasting_bp.route('/skill/<skill_name>', methods=['GET'])
+@forecasting_bp.route('/skill/<skill_name>', methods=['GET', 'OPTIONS'])
 def get_skill_forecast(skill_name):
     """Get detailed historical time series and forecast for a specific skill."""
+    if request.method == 'OPTIONS':
+        return ('', 204)
     forecasts = _generate_all_forecasts()
     sk_clean = skill_name.lower().strip()
 
@@ -173,12 +177,14 @@ def get_skill_forecast(skill_name):
         }
     }), 200
 
-@forecasting_bp.route('/recommendations', methods=['GET'])
+@forecasting_bp.route('/recommendations', methods=['GET', 'OPTIONS'])
 @jwt_required
 def get_personalized_forecast_recommendations():
     """
     Get personalized future skill recommendations combining candidate resume gap + market demand trends.
     """
+    if request.method == 'OPTIONS':
+        return ('', 204)
     user = getattr(request, 'current_user', None)
     user_id = str(user.get("_id", user.get("id")))
 

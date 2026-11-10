@@ -704,13 +704,15 @@ def get_recommended_jobs():
         }), 200
 
 
-@job_bp.route('/<job_id>/match', methods=['GET'])
+@job_bp.route('/<job_id>/match', methods=['GET', 'OPTIONS'])
 @jwt_required
 def get_job_match_analysis(job_id):
     """
     GET /api/jobs/<job_id>/match
     Returns detailed 6-component match analysis for a specific job.
     """
+    if request.method == 'OPTIONS':
+        return ('', 204)
     user = getattr(request, 'current_user', None)
     if not user:
         return jsonify({"success": False, "message": "Unauthorized access."}), 401
