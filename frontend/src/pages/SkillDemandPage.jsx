@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { forecastingAPI } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -16,6 +16,19 @@ let forecastMemoryCache = {
   compareResults: null
 };
 
+// Recognized technical skills list for debounced client-side suggestions
+const TRUSTED_REGISTRY_SKILLS = [
+  "Python", "Java", "SQL", "React", "AWS", "Docker", "Machine Learning",
+  "Kubernetes", "TypeScript", "JavaScript", "Node.js", "C++", "C#", ".NET",
+  "Go", "TensorFlow", "PyTorch", "Tableau", "Power BI", "Cybersecurity",
+  "MongoDB", "PostgreSQL", "Terraform", "Next.js", "Angular", "Vue", "Figma",
+  "Git", "Linux", "CI/CD", "FastAPI", "Django", "Spring Boot", "Snowflake",
+  "BigQuery", "Apache Spark", "Deep Learning", "NLP", "Pandas", "NumPy",
+  "HTML", "CSS", "Tailwind CSS", "Bootstrap", "Redux", "GraphQL", "REST API",
+  "Microservices", "Ethical Hacking", "Network Security", "AutoCAD", "SolidWorks",
+  "Scrum", "Agile", "Product Management", "SEO", "Digital Marketing", "CRM"
+];
+
 const SkillDemandPage = () => {
   const isCacheValid = Boolean(
     forecastMemoryCache.topSkills &&
@@ -28,7 +41,20 @@ const SkillDemandPage = () => {
   const [categories, setCategories] = useState(forecastMemoryCache.categories || []);
   const [topSkills, setTopSkills] = useState(isCacheValid ? forecastMemoryCache.topSkills : null);
   const [recommendations, setRecommendations] = useState(isCacheValid ? forecastMemoryCache.recommendations : []);
-  const [searchSkill, setSearchSkill] = useState(forecastMemoryCache.lastSearchedSkill || 'Python');
+
+  // SEPARATE SEARCH INPUT STATE FROM COMMITTED FORECAST STATE
+  // 1. activeSkill: committed skill whose forecast is displayed
+  const [activeSkill, setActiveSkill] = useState(forecastMemoryCache.lastSearchedSkill || 'Python');
+  // 2. searchInput: local controlled text in the search input (does not trigger forecast)
+  const [searchInput, setSearchInput] = useState(forecastMemoryCache.lastSearchedSkill || 'Python');
+  // 3. debouncedQuery for suggestions
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  // 4. Request tracking ref to cancel/ignore outdated responses and prevent duplicate calls
+  const searchRequestIdRef = useRef(0);
+  const inFlightQueryRef = useRef('');
+
   const [skillForecast, setSkillForecast] = useState(
     isCacheValid && forecastMemoryCache.skillForecasts[forecastMemoryCache.lastSearchedSkill || 'Python']
       ? forecastMemoryCache.skillForecasts[forecastMemoryCache.lastSearchedSkill || 'Python']
@@ -52,7 +78,23 @@ const SkillDemandPage = () => {
   const [error, setError] = useState('');
   const [hoveredPoint, setHoveredPoint] = useState(null);
 
-  // Fetch initial forecast data
+  // 450ms debounce for search suggestions
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchInput.trim());
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const inputSuggestions = useMemo(() => {
+    if (!debouncedQuery || debouncedQuery.length < 1) return [];
+    const q = debouncedQuery.toLowerCase();
+    return TRUSTED_REGISTRY_SKILLS.filter(
+      (s) => s.toLowerCase().includes(q) && s.toLowerCase() !== q
+    ).slice(0, 5);
+  }, [debouncedQuery]);
+
+  // Fetch initial forecast data on mount or manual refresh
   const fetchForecastData = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) {
       setRefreshing(true);
@@ -62,12 +104,12 @@ const SkillDemandPage = () => {
     setError('');
 
     try {
-      const activeSkill = searchSkill.trim() || 'Python';
+      const initialSkill = activeSkill || 'Python';
       const [topRes, catRes, recRes, pyRes, compRes] = await Promise.all([
         forecastingAPI.getTopSkills({ category: selectedCategory !== 'All Categories' ? selectedCategory : '', limit: 6 }),
         forecastingAPI.getCategories().catch(() => null),
         forecastingAPI.getRecommendations().catch(() => null),
-        forecastingAPI.getSkillForecast(activeSkill, { horizon, model: selectedAlgorithm }).catch(() => null),
+        forecastingAPI.getSkillForecast(initialSkill, { horizon, model: selectedAlgorithm }).catch(() => null),
         forecastingAPI.compareSkills(compareSkillsInput, horizon).catch(() => null)
       ]);
 
@@ -86,8 +128,10 @@ const SkillDemandPage = () => {
       }
       if (pyRes?.success && pyRes.data?.forecast) {
         setSkillForecast(pyRes.data.forecast);
-        forecastMemoryCache.skillForecasts[activeSkill.toLowerCase()] = pyRes.data.forecast;
-        forecastMemoryCache.lastSearchedSkill = activeSkill;
+        setActiveSkill(pyRes.data.forecast.skill);
+        setSearchInput(pyRes.data.forecast.skill);
+        forecastMemoryCache.skillForecasts[initialSkill.toLowerCase()] = pyRes.data.forecast;
+        forecastMemoryCache.lastSearchedSkill = initialSkill;
       }
       if (compRes?.success && compRes.data?.skills) {
         setCompareData(compRes.data);
@@ -104,33 +148,112 @@ const SkillDemandPage = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [isCacheValid, searchSkill, horizon, selectedCategory, selectedAlgorithm, compareSkillsInput]);
+    // searchInput is intentionally excluded from dependencies so typing never re-runs this effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCacheValid, horizon, selectedCategory, selectedAlgorithm, compareSkillsInput]);
 
   useEffect(() => {
     if (!isCacheValid) {
       fetchForecastData(false);
     }
-  }, [isCacheValid, fetchForecastData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Central execution for fetching a skill forecast with race-condition & duplicate guard
+  const executeSkillForecast = useCallback(async (targetSkill, options = {}) => {
+    const skillToFetch = (targetSkill || searchInput).trim();
+    if (!skillToFetch) return;
+
+    const requestedHorizon = options.horizon || horizon;
+    const requestedAlgo = options.model || selectedAlgorithm;
+
+    // Prevent duplicate in-flight requests for same parameters
+    const requestKey = `${skillToFetch.toLowerCase()}__${requestedHorizon}__${requestedAlgo}`;
+    if (searching && inFlightQueryRef.current === requestKey) {
+      return;
+    }
+    inFlightQueryRef.current = requestKey;
+
+    // Sequence ID for cancelling/ignoring outdated responses
+    const thisRequestId = ++searchRequestIdRef.current;
+
+    setSearching(true);
+    setIsDropdownOpen(false);
+
+    try {
+      const res = await forecastingAPI.getSkillForecast(skillToFetch, {
+        horizon: requestedHorizon,
+        model: requestedAlgo
+      });
+
+      // Ignore if a newer request was dispatched while waiting
+      if (thisRequestId !== searchRequestIdRef.current) {
+        return;
+      }
+
+      if (res?.success && res.data?.forecast) {
+        setSkillForecast(res.data.forecast);
+        setActiveSkill(res.data.forecast.skill);
+        setSearchInput(res.data.forecast.skill);
+        setValidationError('');
+        setSkillSuggestions([]);
+
+        forecastMemoryCache.lastSearchedSkill = res.data.forecast.skill;
+        forecastMemoryCache.skillForecasts[res.data.forecast.skill.toLowerCase()] = res.data.forecast;
+      }
+    } catch (err) {
+      if (thisRequestId !== searchRequestIdRef.current) {
+        return;
+      }
+      console.error("Skill Search Error:", err);
+      const apiErr = err.response?.data;
+      if (apiErr?.error === 'INVALID_SKILL' || err.response?.status === 400) {
+        // STRICT INVALID SKILL BEHAVIOR:
+        // Do not display forecast chart, demand percentages, or trends
+        setSkillForecast(null);
+        setValidationError(apiErr?.message || `The entered term '${skillToFetch}' is not a recognized technical skill.`);
+        setSkillSuggestions(apiErr?.suggestions || ['Python', 'Java', 'JavaScript']);
+      } else {
+        setValidationError(`Unable to load forecast for '${skillToFetch}'. Please select a recognized technical skill.`);
+        setSkillSuggestions(['Python', 'Java', 'SQL', 'React', 'AWS', 'Docker']);
+      }
+    } finally {
+      if (thisRequestId === searchRequestIdRef.current) {
+        setSearching(false);
+        inFlightQueryRef.current = '';
+      }
+    }
+  }, [searchInput, horizon, selectedAlgorithm, searching]);
+
+  // Handle form submission (Enter key or Forecast button)
+  const handleSearchSubmit = (e) => {
+    if (e) e.preventDefault();
+    setIsDropdownOpen(false);
+    executeSkillForecast(searchInput);
+  };
+
+  // Handle direct skill selection (clicking a pill or card)
+  const handleSelectSkill = (skill) => {
+    setSearchInput(skill);
+    setIsDropdownOpen(false);
+    executeSkillForecast(skill);
+  };
 
   // Handle Horizon Change
   const handleHorizonChange = async (h) => {
     setHorizon(h);
     forecastMemoryCache.horizon = h;
-    if (skillForecast?.skill) {
-      setSearching(true);
+    if (activeSkill) {
+      executeSkillForecast(activeSkill, { horizon: h });
+    }
+    if (compareSkillsInput.trim()) {
       try {
-        const res = await forecastingAPI.getSkillForecast(skillForecast.skill, { horizon: h, model: selectedAlgorithm });
-        if (res?.success && res.data?.forecast) {
-          setSkillForecast(res.data.forecast);
-        }
         const compRes = await forecastingAPI.compareSkills(compareSkillsInput, h);
         if (compRes?.success && compRes.data?.skills) {
           setCompareData(compRes.data);
         }
       } catch (err) {
-        console.error("Horizon change error:", err);
-      } finally {
-        setSearching(false);
+        console.error("Horizon compare error:", err);
       }
     }
   };
@@ -156,57 +279,8 @@ const SkillDemandPage = () => {
   const handleAlgorithmChange = async (algo) => {
     setSelectedAlgorithm(algo);
     forecastMemoryCache.algorithm = algo;
-    if (skillForecast?.skill) {
-      setSearching(true);
-      try {
-        const res = await forecastingAPI.getSkillForecast(skillForecast.skill, { horizon, model: algo });
-        if (res?.success && res.data?.forecast) {
-          setSkillForecast(res.data.forecast);
-        }
-      } catch (err) {
-        console.error("Algorithm change error:", err);
-      } finally {
-        setSearching(false);
-      }
-    }
-  };
-
-  // Search Single Skill
-  const handleSearchSkill = async (e, directSkill = null) => {
-    if (e) e.preventDefault();
-    const query = (directSkill || searchSkill).trim();
-    if (!query) return;
-
-    setSearching(true);
-    setValidationError('');
-    setSkillSuggestions([]);
-
-    try {
-      const res = await forecastingAPI.getSkillForecast(query, { horizon, model: selectedAlgorithm });
-      if (res?.success && res.data?.forecast) {
-        setSkillForecast(res.data.forecast);
-        setSearchSkill(res.data.forecast.skill);
-        forecastMemoryCache.lastSearchedSkill = res.data.forecast.skill;
-        forecastMemoryCache.skillForecasts[res.data.forecast.skill.toLowerCase()] = res.data.forecast;
-        setValidationError('');
-        setSkillSuggestions([]);
-      }
-    } catch (err) {
-      console.error("Skill Search Error:", err);
-      const apiErr = err.response?.data;
-      if (apiErr?.error === 'INVALID_SKILL' || err.response?.status === 400) {
-        // STRICT INVALID SKILL:
-        // Do not display forecast chart, demand percentages, or trends
-        setSkillForecast(null);
-        setValidationError(apiErr?.message || `The entered term '${query}' is not a recognized technical skill.`);
-        setSkillSuggestions(apiErr?.suggestions || ['Python', 'Java', 'JavaScript']);
-      } else {
-        setSkillForecast(null);
-        setValidationError(`Unable to load forecast for '${query}'. Please select a recognized technical skill.`);
-        setSkillSuggestions(['Python', 'Java', 'SQL', 'React', 'AWS', 'Docker']);
-      }
-    } finally {
-      setSearching(false);
+    if (activeSkill) {
+      executeSkillForecast(activeSkill, { model: algo });
     }
   };
 
@@ -434,7 +508,7 @@ const SkillDemandPage = () => {
           {topSkills?.rising_skills?.map((item, idx) => (
             <div
               key={idx}
-              onClick={() => handleSearchSkill(null, item.skill)}
+              onClick={() => handleSelectSkill(item.skill)}
               style={{ display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0', borderBottom: '1px solid var(--border-color)', fontSize: '0.88rem', cursor: 'pointer' }}
               title="Click to view full forecast"
             >
@@ -451,7 +525,7 @@ const SkillDemandPage = () => {
           {topSkills?.stable_skills?.map((item, idx) => (
             <div
               key={idx}
-              onClick={() => handleSearchSkill(null, item.skill)}
+              onClick={() => handleSelectSkill(item.skill)}
               style={{ display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0', borderBottom: '1px solid var(--border-color)', fontSize: '0.88rem', cursor: 'pointer' }}
               title="Click to view full forecast"
             >
@@ -468,7 +542,7 @@ const SkillDemandPage = () => {
           {topSkills?.emerging_skills?.map((item, idx) => (
             <div
               key={idx}
-              onClick={() => handleSearchSkill(null, item.skill)}
+              onClick={() => handleSelectSkill(item.skill)}
               style={{ display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0', borderBottom: '1px solid var(--border-color)', fontSize: '0.88rem', cursor: 'pointer' }}
               title="Click to view full forecast"
             >
@@ -485,7 +559,7 @@ const SkillDemandPage = () => {
           {topSkills?.declining_skills?.map((item, idx) => (
             <div
               key={idx}
-              onClick={() => handleSearchSkill(null, item.skill)}
+              onClick={() => handleSelectSkill(item.skill)}
               style={{ display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0', borderBottom: '1px solid var(--border-color)', fontSize: '0.88rem', cursor: 'pointer' }}
               title="Click to view full forecast"
             >
@@ -529,17 +603,66 @@ const SkillDemandPage = () => {
               )}
             </div>
 
-            <form onSubmit={handleSearchSkill} style={{ display: 'flex', gap: '0.4rem' }}>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="Search skill (e.g. React, AWS)..."
-                value={searchSkill}
-                onChange={(e) => setSearchSkill(e.target.value)}
-                style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem', width: '210px' }}
-              />
-              <button type="submit" className="btn btn-primary" style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem' }} disabled={searching}>
-                {searching ? '...' : 'Forecast'}
+            <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '0.4rem', position: 'relative' }}>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Search skill (e.g. React, AWS)..."
+                  value={searchInput}
+                  onChange={(e) => {
+                    setSearchInput(e.target.value);
+                    setIsDropdownOpen(true);
+                  }}
+                  onFocus={() => setIsDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setIsDropdownOpen(false), 250)}
+                  style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem', width: '220px' }}
+                />
+
+                {/* 450ms Debounced Auto-complete Suggestion Dropdown */}
+                {isDropdownOpen && inputSuggestions.length > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    marginTop: '4px',
+                    background: '#1e293b',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-md)',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)',
+                    zIndex: 50,
+                    overflow: 'hidden'
+                  }}>
+                    {inputSuggestions.map((sug) => (
+                      <div
+                        key={sug}
+                        onMouseDown={() => handleSelectSkill(sug)}
+                        style={{
+                          padding: '0.45rem 0.75rem',
+                          fontSize: '0.82rem',
+                          color: '#e2e8f0',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.05)'
+                        }}
+                      >
+                        <span>⚡ {sug}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>Select</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{ padding: '0.4rem 0.85rem', fontSize: '0.85rem', minWidth: '85px' }}
+                disabled={searching}
+              >
+                {searching ? '⏳ Loading' : 'Forecast'}
               </button>
             </form>
           </div>
@@ -572,7 +695,7 @@ const SkillDemandPage = () => {
                     {skillSuggestions.map((sug) => (
                       <button
                         key={sug}
-                        onClick={() => handleSearchSkill(null, sug)}
+                        onClick={() => handleSelectSkill(sug)}
                         className="btn btn-secondary"
                         style={{
                           fontSize: '0.82rem',
@@ -839,7 +962,7 @@ const SkillDemandPage = () => {
                 {['Python', 'SQL', 'React', 'AWS', 'Docker', 'Java'].map((quickSkill) => (
                   <button
                     key={quickSkill}
-                    onClick={() => handleSearchSkill(null, quickSkill)}
+                    onClick={() => handleSelectSkill(quickSkill)}
                     className="btn btn-secondary"
                     style={{ fontSize: '0.78rem', padding: '0.4rem 0.5rem', textAlign: 'center' }}
                   >
@@ -1051,7 +1174,7 @@ const SkillDemandPage = () => {
                     <td style={{ padding: '0.85rem 1rem', color: 'var(--text-muted)' }}>{item.model_name} (MAE: {item.mae})</td>
                     <td style={{ padding: '0.85rem 1rem' }}>
                       <button
-                        onClick={() => handleSearchSkill(null, item.skill)}
+                        onClick={() => handleSelectSkill(item.skill)}
                         className="btn btn-secondary"
                         style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
                       >
@@ -1112,7 +1235,7 @@ const SkillDemandPage = () => {
                     </td>
                     <td style={{ padding: '1rem' }}>
                       <button
-                        onClick={() => handleSearchSkill(null, rec.skill)}
+                        onClick={() => handleSelectSkill(rec.skill)}
                         className="btn btn-secondary"
                         style={{ fontSize: '0.75rem', padding: '0.35rem 0.7rem' }}
                       >
