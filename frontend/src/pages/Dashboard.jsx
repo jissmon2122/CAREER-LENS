@@ -9,10 +9,33 @@ import RecommendedJobs from '../components/RecommendedJobs';
 const Dashboard = () => {
   const { user, setUser } = useAuth();
   const { refreshLiveJobs } = useJobContext();
-  const [resumes, setResumes] = useState([]);
-  const [analysis, setAnalysis] = useState(null);
+
+  const userId = user?.id || user?._id || 'user';
+  const cacheKeyResumes = `cl_dash_resumes_${userId}`;
+  const cacheKeyAnalysis = `cl_dash_analysis_${userId}`;
+
+  // Instant state recovery from sessionStorage for zero-latency dashboard rendering
+  const [resumes, setResumes] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(cacheKeyResumes);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [analysis, setAnalysis] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem(cacheKeyAnalysis);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [aiStatus, setAiStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Do not block screen if we already have cached resumes or analysis
+  const [loading, setLoading] = useState(() => !resumes.length && !analysis);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState('');
 
@@ -30,46 +53,60 @@ const Dashboard = () => {
   const latestResume = resumes.length > 0 ? resumes[0] : null;
 
   useEffect(() => {
+    let isSubscribed = true;
+
     const fetchDashboardData = async () => {
       try {
-        const resResponse = await resumeAPI.getMyResumes();
-        if (resResponse.success) {
+        // Parallel execution of resumes list and AI model status
+        const [resResponse, aiRes] = await Promise.all([
+          resumeAPI.getMyResumes().catch(() => null),
+          aiAPI.getAIStatus().catch(() => null)
+        ]);
+
+        if (!isSubscribed) return;
+
+        if (aiRes?.success && aiRes.data) {
+          setAiStatus(aiRes.data);
+        }
+
+        if (resResponse?.success) {
           const list = resResponse.data.resumes || [];
           setResumes(list);
+          sessionStorage.setItem(cacheKeyResumes, JSON.stringify(list));
 
           if (list.length > 0) {
             const firstResumeId = list[0].id;
             try {
               const analysisRes = await resumeAPI.getResumeAnalysis(firstResumeId);
-              if (analysisRes.success && analysisRes.data.analysis) {
+              if (isSubscribed && analysisRes.success && analysisRes.data?.analysis) {
                 setAnalysis(analysisRes.data.analysis);
+                sessionStorage.setItem(cacheKeyAnalysis, JSON.stringify(analysisRes.data.analysis));
               }
-            } catch (err) {
-              // Analysis not yet generated for this resume
-              setAnalysis(null);
+            } catch {
+              if (isSubscribed) setAnalysis(null);
             }
+          } else {
+            if (isSubscribed) setAnalysis(null);
           }
-        }
-
-        // Fetch AI Semantic Model Status
-        try {
-          const aiRes = await aiAPI.getAIStatus();
-          if (aiRes.success && aiRes.data) {
-            setAiStatus(aiRes.data);
-          }
-        } catch (aiErr) {
-          console.log("AI Status endpoint not ready yet or disabled");
         }
       } catch (err) {
         console.error("Failed to fetch resumes:", err);
-        setError("Unable to load latest resume information.");
+        if (isSubscribed && !resumes.length) {
+          setError("Unable to load latest resume information.");
+        }
       } finally {
-        setLoading(false);
+        if (isSubscribed) {
+          setLoading(false);
+        }
       }
     };
 
     fetchDashboardData();
-  }, []);
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [userId, cacheKeyResumes, cacheKeyAnalysis]);
 
   const handleTriggerAnalysis = async () => {
     if (!latestResume) return;
@@ -135,10 +172,6 @@ const Dashboard = () => {
     if (score >= 50) return 'Average';
     return 'Needs Improvement';
   };
-
-  if (loading) {
-    return <LoadingSpinner text="Loading candidate dashboard..." />;
-  }
 
   return (
     <div className="container" style={{ padding: '2.5rem 1.5rem 4rem' }}>
@@ -305,7 +338,14 @@ const Dashboard = () => {
             </Link>
           </div>
 
-          {latestResume ? (
+          {loading && !latestResume ? (
+            <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '1.5rem', textAlign: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', color: 'var(--text-subtle)' }}>
+                <span className="spinner" style={{ width: '16px', height: '16px' }} />
+                <span style={{ fontSize: '0.9rem' }}>Synchronizing resume status...</span>
+              </div>
+            </div>
+          ) : latestResume ? (
             <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '1.25rem', border: '1px solid var(--border-color)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div>
@@ -350,6 +390,13 @@ const Dashboard = () => {
         {analyzing ? (
           <div className="glass-card" style={{ gridColumn: 'span 12', padding: '3rem 1.5rem', textAlign: 'center' }}>
             <LoadingSpinner text="Extracting PDF text and validating resume structure..." />
+          </div>
+        ) : loading && !analysis ? (
+          <div className="glass-card" style={{ gridColumn: 'span 12', padding: '2.5rem 1.5rem', textAlign: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', color: 'var(--text-subtle)' }}>
+              <span className="spinner" style={{ width: '18px', height: '18px' }} />
+              <span style={{ fontSize: '0.95rem' }}>Loading resume analytics & ATS scoring...</span>
+            </div>
           </div>
         ) : analysis && (analysis.validation_status !== "VALID_RESUME" || analysis.resume_score === null) ? (
           <div className="glass-card" style={{ gridColumn: 'span 12', padding: '2.5rem 1.5rem', textAlign: 'center', border: '1px solid var(--accent-pink)' }}>

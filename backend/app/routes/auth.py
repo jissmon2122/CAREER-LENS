@@ -16,6 +16,26 @@ logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
+# Bounded in-memory user cache for zero-latency JWT validation (30s TTL, max 200 users)
+_AUTH_USER_CACHE = {}
+_AUTH_USER_CACHE_TTL = 30.0
+
+def get_cached_auth_user(user_id_str):
+    now = time.time()
+    cached = _AUTH_USER_CACHE.get(str(user_id_str))
+    if cached and now < cached[1]:
+        return cached[0]
+    return None
+
+def set_cached_auth_user(user_id_str, user_dict):
+    if len(_AUTH_USER_CACHE) > 200:
+        _AUTH_USER_CACHE.clear()
+    _AUTH_USER_CACHE[str(user_id_str)] = (user_dict, time.time() + _AUTH_USER_CACHE_TTL)
+
+def invalidate_user_auth_cache(user_id_str):
+    if user_id_str:
+        _AUTH_USER_CACHE.pop(str(user_id_str), None)
+
 def jwt_required(f):
     """Decorator to enforce JWT authentication on protected endpoints."""
     @functools.wraps(f)
@@ -59,31 +79,36 @@ def jwt_required(f):
                     "error": "Token invalid"
                 }), 401
 
-            # Check database connection state before attempting lookup
-            if not Database.is_connected():
-                # Allow fallback if in-memory user exists (e.g. dev/mock test)
-                in_mem_user = UserModel._in_memory_users.get(str(user_id))
-                if in_mem_user:
-                    request.current_user = in_mem_user
-                    logger.info(f"[AUTH VERIFY IN-MEMORY] user_id='{user_id}' verified via in-memory store in {round(time.time() - t0, 3)}s")
-                    return f(*args, **kwargs)
+            # Fast in-memory user cache lookup to eliminate duplicate DB queries across concurrent requests
+            user = get_cached_auth_user(user_id)
+            if not user:
+                # Check database connection state before attempting lookup
+                if not Database.is_connected():
+                    # Allow fallback if in-memory user exists (e.g. dev/mock test)
+                    in_mem_user = UserModel._in_memory_users.get(str(user_id))
+                    if in_mem_user:
+                        request.current_user = in_mem_user
+                        logger.info(f"[AUTH VERIFY IN-MEMORY] user_id='{user_id}' verified via in-memory store in {round(time.time() - t0, 3)}s")
+                        return f(*args, **kwargs)
 
-                logger.warning(f"[AUTH VERIFY ERROR] Database offline during token verification for user_id='{user_id}' for {method} {path}")
-                return jsonify({
-                    "success": False,
-                    "message": "Database is temporarily unavailable. Please try again shortly.",
-                    "error": "Database unavailable"
-                }), 503
+                    logger.warning(f"[AUTH VERIFY ERROR] Database offline during token verification for user_id='{user_id}' for {method} {path}")
+                    return jsonify({
+                        "success": False,
+                        "message": "Database is temporarily unavailable. Please try again shortly.",
+                        "error": "Database unavailable"
+                    }), 503
 
-            try:
-                user = UserModel.find_by_id(user_id)
-            except Exception as db_exc:
-                logger.error(f"[AUTH VERIFY DB ERROR] Database error looking up user_id='{user_id}' for {method} {path}: {db_exc}")
-                return jsonify({
-                    "success": False,
-                    "message": "Database is temporarily unavailable. Please try again shortly.",
-                    "error": "Database unavailable"
-                }), 503
+                try:
+                    user = UserModel.find_by_id(user_id)
+                    if user:
+                        set_cached_auth_user(user_id, user)
+                except Exception as db_exc:
+                    logger.error(f"[AUTH VERIFY DB ERROR] Database error looking up user_id='{user_id}' for {method} {path}: {db_exc}")
+                    return jsonify({
+                        "success": False,
+                        "message": "Database is temporarily unavailable. Please try again shortly.",
+                        "error": "Database unavailable"
+                    }), 503
 
             if not user:
                 logger.info(f"[AUTH VERIFY FAILED] User not found for user_id='{user_id}' for {method} {path} in {round(time.time() - t0, 3)}s")

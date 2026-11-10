@@ -8,7 +8,11 @@ const ProtectedRoute = ({ children }) => {
   const location = useLocation();
 
   if (loading) {
-    return <LoadingSpinner text="Verifying authentication status..." />;
+    return (
+      <div className="container" style={{ padding: '4rem 1.5rem', minHeight: '60vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <LoadingSpinner text="Loading session..." />
+      </div>
+    );
   }
 
   if (!isAuthenticated) {

@@ -32,6 +32,9 @@ def update_user_profile():
             "error": "Update failed"
         }), 400
 
+    from app.routes.auth import invalidate_user_auth_cache
+    invalidate_user_auth_cache(user_id)
+
     return jsonify({
         "success": True,
         "message": "Profile updated successfully",
