@@ -174,6 +174,7 @@ def upload_resume():
         f.write(file_bytes)
 
     file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+    del file_bytes  # Reclaim raw binary upload memory
 
     resume_doc = ResumeModel.create_resume(
         user_id=user_id,
@@ -184,6 +185,7 @@ def upload_resume():
         file_size=file_size,
         file_data_base64=file_base64
     )
+    del file_base64  # Reclaim temporary base64 string
 
     resume_json = ResumeModel.to_json(resume_doc)
 

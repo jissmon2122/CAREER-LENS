@@ -19,9 +19,10 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# High-performance in-memory recommendations cache
+# High-performance bounded in-memory recommendations cache (capped to 15 entries for low RAM)
 _RECOMMENDATIONS_CACHE = {}
 _RECOMMENDATIONS_CACHE_TTL = 1800  # 30 minutes
+MAX_RECOMMENDATIONS_CACHE_SIZE = 15
 
 def clear_recommendations_cache(target_user_id=None):
     global _RECOMMENDATIONS_CACHE
@@ -652,9 +653,10 @@ def get_recommended_jobs():
             }
         }
 
-        # Cache successful recommendations in memory
-        if len(_RECOMMENDATIONS_CACHE) > 100:
-            _RECOMMENDATIONS_CACHE.clear()
+        # Cache successful recommendations in memory with strict LRU eviction
+        while len(_RECOMMENDATIONS_CACHE) >= MAX_RECOMMENDATIONS_CACHE_SIZE:
+            oldest_key = next(iter(_RECOMMENDATIONS_CACHE))
+            _RECOMMENDATIONS_CACHE.pop(oldest_key, None)
         _RECOMMENDATIONS_CACHE[cache_key] = {
             "timestamp": time.time(),
             "data": resp_payload

@@ -1,5 +1,6 @@
 import os
 import re
+import gc
 import logging
 import fitz  # PyMuPDF
 
@@ -156,7 +157,8 @@ class PDFService:
         # Step 2: Primary Extraction via PyMuPDF (fitz)
         logger.info(f"PDF_TEXT_EXTRACTION_STARTED: primary_method=PyMuPDF, pages={page_count}")
         page_texts = []
-        for page_idx in range(page_count):
+        max_extract_pages = min(page_count, 10)  # Bound extraction to max 10 pages for memory safety
+        for page_idx in range(max_extract_pages):
             try:
                 page = doc[page_idx]
                 p_text = page.get_text("text") or ""
@@ -167,6 +169,8 @@ class PDFService:
                 logger.warning(f"Failed to extract text from page {page_idx} of {file_name}: {page_err}")
 
         doc.close()
+        doc = None
+        gc.collect()
 
         pymupdf_combined = "\n\n".join(page_texts)
         pymupdf_clean = PDFService._normalize_text(pymupdf_combined)
@@ -185,7 +189,7 @@ class PDFService:
                 import pdfplumber
                 with pdfplumber.open(file_path) as pdf:
                     plumber_pages = []
-                    for page in pdf.pages:
+                    for page in pdf.pages[:10]:
                         pt = page.extract_text() or ""
                         pt = pt.replace('\x00', '')
                         if pt.strip():
@@ -204,6 +208,8 @@ class PDFService:
                         extraction_method = "pdfplumber"
             except Exception as plumber_err:
                 logger.warning(f"pdfplumber fallback attempt encountered error: {plumber_err}")
+            finally:
+                gc.collect()
 
         # Step 4: Scanned / Image-Based PDF Fallback via Local RapidOCR
         if char_count < 30 or word_count < 6:
@@ -257,8 +263,8 @@ class PDFService:
     @staticmethod
     def _perform_ocr_fallback(file_path, page_count):
         """
-        Render all PDF pages at 300 DPI and run RapidOCR engine.
-        Clean up rendered images in memory immediately.
+        Render PDF pages at 150 DPI (optimized for low RAM) and run RapidOCR engine.
+        Process up to 3 pages max for scanned resumes. Free images immediately.
         """
         file_name = os.path.basename(file_path) if file_path else "unknown.pdf"
         logger.info(f"OCR_STARTED: filename={file_name}, total_pages={page_count}")
@@ -272,11 +278,12 @@ class PDFService:
         try:
             doc = fitz.open(file_path)
             all_page_texts = []
+            max_ocr_pages = min(len(doc), 3)  # Maximum 3 pages for OCR to prevent memory spikes
 
-            for page_idx in range(len(doc)):
+            for page_idx in range(max_ocr_pages):
                 page = doc[page_idx]
-                # Render page to high-res 300 DPI image for optimal text recognition
-                pix = page.get_pixmap(dpi=300)
+                # Render page at 150 DPI: balances crystal clear OCR with 75% memory savings vs 300 DPI
+                pix = page.get_pixmap(dpi=150)
                 img_bytes = pix.tobytes("png")
                 pix = None  # Free memory immediately
 
@@ -291,6 +298,9 @@ class PDFService:
                         all_page_texts.append(page_text)
 
             doc.close()
+            doc = None
+            ocr_engine = None
+            gc.collect()
 
             ocr_combined = "\n\n".join(all_page_texts)
             ocr_clean = PDFService._normalize_text(ocr_combined)

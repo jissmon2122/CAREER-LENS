@@ -492,6 +492,10 @@ def get_personalized_forecast_recommendations():
         }
     }
 
+    while len(_USER_FORECAST_REC_CACHE) >= 20:
+        oldest_k = next(iter(_USER_FORECAST_REC_CACHE))
+        _USER_FORECAST_REC_CACHE.pop(oldest_k, None)
+
     _USER_FORECAST_REC_CACHE[rec_cache_key] = {
         "timestamp": now_ts,
         "data": response_payload

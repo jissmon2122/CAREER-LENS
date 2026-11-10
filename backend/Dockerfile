@@ -1,10 +1,17 @@
 FROM python:3.12-slim
 
-# Set environment variables
+# Set environment variables (enforce single-thread CPU execution to fit Render 512MB RAM)
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=5000 \
-    UPLOAD_FOLDER=uploads/resumes
+    UPLOAD_FOLDER=uploads/resumes \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    VECLIB_MAXIMUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    TORCH_NUM_THREADS=1 \
+    TOKENIZERS_PARALLELISM=false
 
 # Install essential system dependencies for OpenCV, PyMuPDF, and ONNX Runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,9 +28,6 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Download default spaCy English model for NLP text processing
-RUN python -m spacy download en_core_web_sm || true
-
 # Pre-cache SentenceTransformer model to eliminate cold-start download latency on Render
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')" || true
 
@@ -35,5 +39,5 @@ RUN mkdir -p /app/uploads/resumes
 
 EXPOSE 5000
 
-# Run with Gunicorn WSGI server in production (bind dynamically to Render's $PORT)
-CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000} --workers 2 --threads 4 --worker-class gthread --timeout 120"]
+# Run with Gunicorn WSGI server: exactly 1 worker with 4 threads, recycled every 500 requests to permanently stay within 512MB RAM
+CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT:-5000} --workers 1 --threads 4 --worker-class gthread --max-requests 500 --max-requests-jitter 50 --timeout 120"]

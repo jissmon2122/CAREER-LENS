@@ -41,23 +41,27 @@ class ResumeModel:
         return doc
 
     @staticmethod
-    def find_by_user(user_id):
-        """Retrieve all resumes owned by a specific user (User Data Isolation)."""
+    def find_by_user(user_id, include_base64=False):
+        """Retrieve all resumes owned by a specific user (User Data Isolation). Omits heavy base64 by default for memory optimization."""
         user_id_str = str(user_id)
         coll = ResumeModel.get_collection()
         if coll is not None:
             try:
                 user_obj_id = ObjectId(user_id_str)
-                cursor = coll.find({"user_id": user_obj_id}).sort("uploaded_at", -1)
+                projection = None if include_base64 else {"file_data_base64": 0}
+                cursor = coll.find({"user_id": user_obj_id}, projection=projection).sort("uploaded_at", -1)
                 return list(cursor)
             except Exception:
                 return []
         
         # In-memory filter
-        return [
+        resumes = [
             r for r in sorted(ResumeModel._in_memory_resumes, key=lambda x: x["uploaded_at"], reverse=True)
             if str(r.get("user_id")) == user_id_str
         ]
+        if not include_base64:
+            return [{k: v for k, v in r.items() if k != "file_data_base64"} for r in resumes]
+        return resumes
 
     @staticmethod
     def find_by_id_and_user(resume_id, user_id):

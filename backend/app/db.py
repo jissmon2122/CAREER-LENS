@@ -23,8 +23,8 @@ class Database:
             "socketTimeoutMS": 5000,
             "maxIdleTimeMS": 45000,
             "waitQueueTimeoutMS": 5000,
-            "maxPoolSize": 25,
-            "minPoolSize": 2,
+            "maxPoolSize": 10,  # Tuned for single-worker Render 512MB RAM limit
+            "minPoolSize": 1,
             "retryWrites": True,
             "retryReads": True,
         }

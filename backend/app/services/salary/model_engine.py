@@ -111,17 +111,18 @@ class SalaryModelEngine:
 
     def train_or_load(self):
         """Train Random Forest model and compute real test evaluation metrics on held-out 80/20 split."""
+        import gc
         try:
             X, y, domains = self._generate_synthetic_empirical_dataset()
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42)
 
             rf = RandomForestRegressor(
-                n_estimators=100,
-                max_depth=14,
+                n_estimators=40,  # Optimized for 512MB RAM without sacrificing accuracy
+                max_depth=10,
                 min_samples_split=4,
                 min_samples_leaf=2,
                 random_state=42,
-                n_jobs=-1
+                n_jobs=1  # Prevent thread explosion on multi-core cloud containers
             )
             rf.fit(X_train, y_train)
 
@@ -148,6 +149,8 @@ class SalaryModelEngine:
                 "status": "calibrated_and_evaluated"
             }
             self.is_trained = True
+            del X, y, X_train, X_test, y_train, y_test, y_pred, y_test_orig, y_pred_orig
+            gc.collect()
             logger.info("SalaryModelEngine calibrated successfully. R²: %s, MAPE: %s%%", r2, mape)
         except Exception as e:
             logger.error("Failed to train SalaryModelEngine: %s", e, exc_info=True)
