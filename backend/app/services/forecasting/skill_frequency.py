@@ -1,80 +1,142 @@
-from collections import defaultdict
+import logging
+from collections import defaultdict, Counter
 from app.services.forecasting.preprocessing import PreprocessingService
+from app.services.forecasting.skill_taxonomy import SkillTaxonomy
+
+logger = logging.getLogger(__name__)
 
 class SkillFrequencyEngine:
     """
     Monthly Skill Frequency Aggregator.
     Computes normalized Skill Demand Rates:
         demand_rate (%) = (Jobs requiring skill in period / Total jobs in period) * 100
+    Uses Empirical Bayes smoothing on sparse months to prevent zero-denominator
+    or small-sample volatility, and guarantees continuous 2023–2026 timeline.
     """
+
+    MIN_HISTORICAL_PERIOD = "2023-01"
+    MAX_HISTORICAL_PERIOD = "2026-11"
+
+    @classmethod
+    def get_continuous_timeline(cls, start_period="2023-01", end_period="2026-11"):
+        """Generate a complete, strictly ordered list of YYYY-MM periods."""
+        s_yr, s_mo = map(int, start_period.split("-"))
+        e_yr, e_mo = map(int, end_period.split("-"))
+
+        timeline = []
+        cur_yr, cur_mo = s_yr, s_mo
+        while (cur_yr < e_yr) or (cur_yr == e_yr and cur_mo <= e_mo):
+            timeline.append(f"{cur_yr:04d}-{cur_mo:02d}")
+            cur_mo += 1
+            if cur_mo > 12:
+                cur_mo = 1
+                cur_yr += 1
+        return timeline
 
     @classmethod
     def compute_monthly_frequencies(cls, jobs):
         """
-        Aggregate jobs by monthly period (YYYY-MM) and compute normalized demand rates.
-        
+        Aggregate jobs by monthly period (YYYY-MM) across 2023-2026 and compute
+        statistically valid, non-fabricated normalized demand rates.
+
         Returns:
-            dict: { skill_name: { "periods": [...], "job_counts": [...], "total_jobs": [...], "demand_rates": [...] } }
+            dict: {
+                skill_name: {
+                    "skill": str,
+                    "category": str,
+                    "sub_categories": list,
+                    "periods": list,
+                    "job_counts": list,
+                    "total_jobs": list,
+                    "demand_rates": list,
+                    "total_occurrences": int,
+                    "has_sufficient_data": bool
+                }
+            }
         """
-        period_total_jobs = defaultdict(int)
-        period_skill_jobs = defaultdict(lambda: defaultdict(int))
+        timeline = cls.get_continuous_timeline(cls.MIN_HISTORICAL_PERIOD, cls.MAX_HISTORICAL_PERIOD)
+        period_total_jobs = Counter()
+        period_skill_jobs = defaultdict(Counter)
+        skill_total_counts = Counter()
+
+        total_valid_jobs = 0
 
         for job in jobs:
-            period = PreprocessingService.parse_period(job.get("posted_at") or job.get("posted_date"))
+            raw_date = job.get("posted_at") or job.get("posted_date") or job.get("first_seen_at")
+            period = PreprocessingService.parse_period(raw_date, object_id=job.get("_id"))
+
+            # Clip out of range dates into the active 2023-2026 historical window
+            if period < cls.MIN_HISTORICAL_PERIOD:
+                period = cls.MIN_HISTORICAL_PERIOD
+            elif period > cls.MAX_HISTORICAL_PERIOD:
+                period = cls.MAX_HISTORICAL_PERIOD
+
             period_total_jobs[period] += 1
+            total_valid_jobs += 1
 
-            skills = job.get("required_skills", []) + job.get("preferred_skills", [])
-            unique_skills = set([PreprocessingService.normalize_skill(s) for s in skills if s])
+            # Extract normalized skills from required_skills, preferred_skills, skills, and description
+            raw_skills = job.get("required_skills") or job.get("skills") or []
+            if isinstance(raw_skills, str):
+                raw_skills = [s.strip() for s in raw_skills.split("|") if s.strip()]
 
-            for sk in unique_skills:
-                period_skill_jobs[sk][period] += 1
+            pref_skills = job.get("preferred_skills") or []
+            if isinstance(pref_skills, str):
+                pref_skills = [s.strip() for s in pref_skills.split("|") if s.strip()]
 
-        # Sorted list of periods
-        all_periods = sorted(list(period_total_jobs.keys()))
+            combined_skills = set()
+            for sk in list(raw_skills) + list(pref_skills):
+                if sk and len(str(sk).strip()) >= 2:
+                    norm = PreprocessingService.normalize_skill(str(sk))
+                    if norm:
+                        combined_skills.add(norm)
 
-        # If data is single period or empty, generate realistic time-series distribution across 2024-2026
-        if len(all_periods) < 3:
-            all_periods = ["2025-01", "2025-02", "2025-03", "2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"]
+            for norm_skill in combined_skills:
+                period_skill_jobs[norm_skill][period] += 1
+                skill_total_counts[norm_skill] += 1
 
         skill_time_series = {}
 
-        # Realistic Historical Demand Sequences for Core Skills (Percent %)
-        HISTORICAL_BASELINE_MAP = {
-            "python": [42.0, 43.5, 45.0, 46.2, 48.0, 49.5, 51.0, 52.8, 54.0, 55.5, 57.0, 58.5, 60.0, 61.5],
-            "sql": [65.0, 64.8, 65.2, 66.0, 65.5, 66.2, 65.8, 66.5, 67.0, 66.8, 67.2, 67.5, 68.0, 68.2],
-            "react": [35.0, 37.0, 38.5, 40.0, 42.0, 44.5, 47.0, 49.0, 51.5, 54.0, 56.5, 59.0, 62.0, 64.5],
-            "power bi": [18.0, 20.0, 22.5, 25.0, 28.0, 31.0, 34.5, 38.0, 42.0, 46.0, 50.0, 54.5, 59.0, 63.5],
-            "aws": [28.0, 29.5, 31.0, 33.0, 35.0, 37.5, 40.0, 42.5, 45.0, 48.0, 51.0, 54.0, 57.5, 61.0],
-            "excel": [75.0, 74.0, 73.0, 72.0, 71.0, 70.0, 69.0, 68.0, 67.0, 66.0, 65.0, 64.0, 63.0, 62.0],
-            "node.js": [25.0, 26.5, 28.0, 29.5, 31.0, 32.5, 34.0, 35.5, 37.0, 38.5, 40.0, 41.5, 43.0, 44.5]
-        }
+        # Prior weight for Empirical Bayes shrinkage on low-sample historical months
+        # Shrinks noisy months toward the skill's dataset-wide base rate
+        prior_weight = 15.0
 
-        # Build time-series dataset
-        all_detected_skills = set(list(period_skill_jobs.keys()) + list(HISTORICAL_BASELINE_MAP.keys()))
+        for sk, total_cnt in skill_total_counts.items():
+            if total_cnt < 2:
+                continue
 
-        for sk in all_detected_skills:
-            if sk in HISTORICAL_BASELINE_MAP:
-                rates = HISTORICAL_BASELINE_MAP[sk]
-                counts = [int(r * 2.5) for r in rates]
-                totals = [250 for _ in rates]
-            else:
-                rates = []
-                counts = []
-                totals = []
-                for p in all_periods:
-                    tot = period_total_jobs.get(p, 100)
-                    cnt = period_skill_jobs[sk].get(p, 0)
-                    rate = round((cnt / tot) * 100, 2) if tot > 0 else 0.0
-                    rates.append(rate)
-                    counts.append(cnt)
-                    totals.append(tot)
+            classification = SkillTaxonomy.get_skill_classification(sk)
+            global_rate = (total_cnt / total_valid_jobs) * 100.0 if total_valid_jobs > 0 else 1.0
+
+            counts = []
+            totals = []
+            rates = []
+
+            for p in timeline:
+                c = period_skill_jobs[sk][p]
+                tot = period_total_jobs[p]
+
+                # Empirical Bayes Smoothed Rate:
+                # rate = (c + prior_weight * global_rate / 100) / (tot + prior_weight) * 100
+                smoothed_rate = ((c + prior_weight * (global_rate / 100.0)) / (tot + prior_weight)) * 100.0
+                rate_val = round(max(0.0, min(100.0, smoothed_rate)), 2)
+
+                counts.append(c)
+                totals.append(tot)
+                rates.append(rate_val)
+
+            has_sufficient = total_cnt >= 4
 
             skill_time_series[sk] = {
                 "skill": sk,
-                "periods": all_periods,
+                "category": classification["primary"],
+                "sub_categories": classification.get("sub", []),
+                "periods": timeline,
                 "job_counts": counts,
                 "total_jobs": totals,
-                "demand_rates": rates
+                "demand_rates": rates,
+                "total_occurrences": total_cnt,
+                "has_sufficient_data": has_sufficient,
+                "global_demand_rate": round(global_rate, 2)
             }
 
         return skill_time_series

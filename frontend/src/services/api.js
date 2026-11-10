@@ -225,12 +225,25 @@ export const skillGapAPI = {
 };
 
 export const forecastingAPI = {
-  getTopSkills: async () => {
-    const response = await api.get('/forecasting/top-skills');
+  getTopSkills: async (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    const url = query ? `/forecasting/top-skills?${query}` : '/forecasting/top-skills';
+    const response = await api.get(url);
     return response.data;
   },
-  getSkillForecast: async (skillName) => {
-    const response = await api.get(`/forecasting/skill/${encodeURIComponent(skillName)}`);
+  getSkillForecast: async (skillName, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    const url = `/forecasting/skill/${encodeURIComponent(skillName)}${query ? `?${query}` : ''}`;
+    const response = await api.get(url);
+    return response.data;
+  },
+  getCategories: async () => {
+    const response = await api.get('/forecasting/categories');
+    return response.data;
+  },
+  compareSkills: async (skills, horizon = 36) => {
+    const skillList = Array.isArray(skills) ? skills.join(',') : skills;
+    const response = await api.get(`/forecasting/compare?skills=${encodeURIComponent(skillList)}&horizon=${horizon}`);
     return response.data;
   },
   getRecommendations: async () => {

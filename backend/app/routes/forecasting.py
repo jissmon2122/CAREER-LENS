@@ -5,6 +5,8 @@ from app.services.forecasting.skill_frequency import SkillFrequencyEngine
 from app.services.forecasting.evaluation import ModelEvaluator
 from app.services.forecasting.trend_analysis import TrendAnalysisEngine
 from app.services.forecasting.recommendations import ForecastingRecommendationEngine
+from app.services.forecasting.preprocessing import PreprocessingService
+from app.services.forecasting.skill_taxonomy import SkillTaxonomy
 from app.services.skill_gap import SkillGapEngine
 from app.models.resume import ResumeModel
 from app.models.resume_analysis import ResumeAnalysisModel
@@ -18,17 +20,23 @@ logger = logging.getLogger(__name__)
 
 forecasting_bp = Blueprint('forecasting', __name__, url_prefix='/api/forecasting')
 
-# In-memory forecast caches
+# In-memory forecast cache (1 hour TTL)
 _ALL_FORECASTS_CACHE = {"timestamp": 0, "data": None}
-_FORECASTS_TTL_SECONDS = 3600  # 1 hour
+_FORECASTS_TTL_SECONDS = 3600
 _USER_FORECAST_REC_CACHE = {}
 
+TOTAL_FORECAST_HORIZON_MONTHS = 36
+
 def _generate_all_forecasts(force_refresh=False):
-    """Helper to generate and return time-series forecasts across all dataset skills with high-performance caching."""
+    """
+    Generate and return continuous time-series forecasts across all dataset skills.
+    Uses real 2023-2026 historical observations and forecasts the next 36 months (2026-12 to 2029-11).
+    Evaluates all 4 algorithms (Naive, Moving Average, Linear Regression, Exponential Smoothing).
+    """
     global _ALL_FORECASTS_CACHE
     now_ts = time.time()
 
-    # 1. Check in-memory cache
+    # 1. In-memory cache hit
     if not force_refresh and _ALL_FORECASTS_CACHE["data"] and (now_ts - _ALL_FORECASTS_CACHE["timestamp"] < _FORECASTS_TTL_SECONDS):
         return _ALL_FORECASTS_CACHE["data"]
 
@@ -36,67 +44,106 @@ def _generate_all_forecasts(force_refresh=False):
     if not force_refresh:
         try:
             existing_docs = SkillForecastModel.get_all_forecasts()
-            if existing_docs and len(existing_docs) >= 10:
-                forecasts = {}
-                for d in existing_docs:
-                    sk = str(d.get("skill", "")).lower().strip()
-                    if sk:
-                        forecasts[sk] = d
-                if len(forecasts) >= 10:
+            # Only use if documents have the new 36M horizon and non-zero counts
+            if existing_docs and len(existing_docs) >= 20:
+                has_36m = any(len(d.get("forecast_periods", [])) >= 36 for d in existing_docs)
+                has_data = sum(1 for d in existing_docs if d.get("current_demand", 0) > 0) >= 15
+                if has_36m and has_data:
+                    forecasts = {}
+                    for d in existing_docs:
+                        sk = str(d.get("skill", "")).lower().strip()
+                        if sk:
+                            forecasts[sk] = d
                     _ALL_FORECASTS_CACHE = {"timestamp": now_ts, "data": forecasts}
-                    logger.info(f"Loaded {len(forecasts)} forecasts from MongoDB cache in 0ms.")
+                    logger.info(f"Loaded {len(forecasts)} verified 36M forecasts from database cache.")
                     return forecasts
         except Exception as e:
             logger.warning(f"Could not load forecasts from database cache: {e}")
 
-    # 3. Compute forecasts across dataset skills
-    logger.info("Computing time-series forecasting models across dataset skills...")
-    all_jobs = JobService.get_all_jobs()
-    time_series_map = SkillFrequencyEngine.compute_monthly_frequencies(all_jobs)
+    # 3. Compute forecasts from real job vacancies in MongoDB Atlas
+    logger.info("Computing time-series forecasting models across dataset skills (2023-2026 -> 36M future)...")
+    coll = None
+    try:
+        from app.models.job import JobModel
+        coll = JobModel.get_collection()
+    except Exception:
+        pass
+
+    if coll is not None:
+        raw_jobs = list(coll.find({}, {
+            "posted_at": 1, "posted_date": 1, "first_seen_at": 1,
+            "required_skills": 1, "preferred_skills": 1, "skills": 1,
+            "title": 1, "clean_description": 1
+        }))
+    else:
+        raw_jobs = JobService.get_all_jobs()
+
+    time_series_map = SkillFrequencyEngine.compute_monthly_frequencies(raw_jobs)
     forecasts = {}
     docs_to_save = []
+
+    last_historical_period = SkillFrequencyEngine.MAX_HISTORICAL_PERIOD  # "2026-11"
+    future_periods = PreprocessingService.generate_forecast_periods(last_historical_period, horizon=TOTAL_FORECAST_HORIZON_MONTHS)
 
     for sk, ts in time_series_map.items():
         rates = ts["demand_rates"]
         current_demand = rates[-1] if rates else 0.0
 
-        eval_res = ModelEvaluator.evaluate_and_select_best_model(rates, horizon=3)
+        # Run model evaluation across all 4 algorithms on historical split
+        eval_res = ModelEvaluator.evaluate_and_select_best_model(rates, horizon=TOTAL_FORECAST_HORIZON_MONTHS)
         best_model = eval_res["best_model"]
-        preds = best_model.predict(horizon=3)
-        predicted_demand = preds[-1] if preds else current_demand
 
-        # Confidence bounds (+/- MAE)
+        # Generate 36-month predictions & prediction intervals
+        preds, lower_bounds, upper_bounds = best_model.predict_with_intervals(horizon=TOTAL_FORECAST_HORIZON_MONTHS)
+        predicted_36m = preds[-1] if preds else current_demand
+
+        # Get individual forecasts for all 4 models
+        all_model_preds = ModelEvaluator.fit_and_predict_all_models(rates, horizon=TOTAL_FORECAST_HORIZON_MONTHS)
+
         mae = eval_res["mae"]
-        if eval_res.get("reliability") in ("LOW", "INSUFFICIENT_HISTORICAL_DATA") or mae > 25.0:
-            lower_bound = 0.0
-            upper_bound = 0.0
-            confidence_label = "Confidence interval unavailable"
-        else:
-            lower_bound = round(max(0.0, predicted_demand - mae), 1)
-            upper_bound = round(min(100.0, predicted_demand + mae), 1)
-            confidence_label = f"[{lower_bound}% – {upper_bound}%]"
+        rmse = eval_res["rmse"]
+        mape = eval_res["mape"]
+        reliability = eval_res["reliability"]
 
-        trend_res = TrendAnalysisEngine.classify_trend(rates, current_demand, predicted_demand)
+        if not ts.get("has_sufficient_data") or reliability == "INSUFFICIENT_HISTORICAL_DATA":
+            confidence_label = "Confidence bounds wide (insufficient historical data)"
+        else:
+            confidence_label = f"[{lower_bounds[5]}% – {upper_bounds[5]}%] (6M) / [{lower_bounds[-1]}% – {upper_bounds[-1]}%] (36M)"
+
+        trend_res = TrendAnalysisEngine.classify_trend(rates, current_demand, predicted_36m)
 
         forecast_doc = {
-            "skill": sk.title(),
-            "horizon": "6M",
+            "skill": sk.lower(),
+            "skill_display": sk.title(),
+            "category": ts["category"],
+            "sub_categories": ts.get("sub_categories", []),
+            "horizon": f"{TOTAL_FORECAST_HORIZON_MONTHS}M",
             "current_demand": current_demand,
-            "predicted_demand": predicted_demand,
-            "lower_bound": lower_bound,
-            "upper_bound": upper_bound,
+            "predicted_demand": predicted_36m,
+            "lower_bound": lower_bounds[-1] if lower_bounds else current_demand,
+            "upper_bound": upper_bounds[-1] if upper_bounds else current_demand,
             "confidence_label": confidence_label,
             "trend": trend_res["trend"],
             "trend_label": trend_res["trend_label"],
             "growth_rate": trend_res["growth_rate"],
+            "relative_growth": trend_res["relative_growth"],
+            "growth_diff": trend_res["growth_diff"],
+            "reason": trend_res["reason"],
             "model_name": eval_res["best_model_name"],
             "mae": mae,
-            "rmse": eval_res["rmse"],
-            "reliability": eval_res["reliability"],
+            "rmse": rmse,
+            "mape": mape,
+            "reliability": reliability,
             "periods": ts["periods"],
             "historical_rates": rates,
-            "forecast_periods": ["2026-03", "2026-04", "2026-05"],
-            "forecast_rates": preds
+            "forecast_periods": future_periods,
+            "forecast_rates": preds,
+            "forecast_lower_bounds": lower_bounds,
+            "forecast_upper_bounds": upper_bounds,
+            "model_comparisons": eval_res["model_comparisons"],
+            "all_model_predictions": all_model_preds,
+            "has_sufficient_data": ts.get("has_sufficient_data", True),
+            "total_occurrences": ts.get("total_occurrences", 0)
         }
 
         docs_to_save.append(forecast_doc)
@@ -105,75 +152,233 @@ def _generate_all_forecasts(force_refresh=False):
     # Batch save into database
     try:
         SkillForecastModel.save_forecasts_batch(docs_to_save)
+        logger.info(f"Saved {len(docs_to_save)} forecast documents into MongoDB.")
     except Exception as e:
         logger.warning(f"Batch forecast save warning: {e}")
 
     _ALL_FORECASTS_CACHE = {"timestamp": now_ts, "data": forecasts}
     return forecasts
 
-@forecasting_bp.route('/top-skills', methods=['GET', 'OPTIONS'])
-def get_top_skills():
-    """Get top rising, stable, declining, and emerging skills."""
+@forecasting_bp.route('/categories', methods=['GET', 'OPTIONS'])
+def get_categories():
+    """Return available skill categories and skill counts per category."""
     if request.method == 'OPTIONS':
         return ('', 204)
+
+    forecasts = _generate_all_forecasts()
+    categories_dict = {}
+
+    for cat in SkillTaxonomy.CATEGORIES:
+        categories_dict[cat] = 0
+
+    for f in forecasts.values():
+        c = f.get("category", "General Technical")
+        if c in categories_dict:
+            categories_dict[c] += 1
+        else:
+            categories_dict[c] = 1
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "categories": SkillTaxonomy.CATEGORIES,
+            "category_counts": categories_dict
+        }
+    }), 200
+
+@forecasting_bp.route('/top-skills', methods=['GET', 'OPTIONS'])
+def get_top_skills():
+    """
+    Get top rising, stable, declining, and emerging skills.
+    Supports ?category=... and ?limit=... query parameters.
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    category = request.args.get('category', '').strip()
+    limit = int(request.args.get('limit', 8))
+
     forecasts = _generate_all_forecasts()
     all_list = list(forecasts.values())
+
+    if category and category.lower() != "all categories":
+        all_list = [f for f in all_list if f.get("category", "").lower() == category.lower()]
 
     rising = [f for f in all_list if f["trend"] == "RISING"]
     stable = [f for f in all_list if f["trend"] == "STABLE"]
     declining = [f for f in all_list if f["trend"] == "DECLINING"]
     emerging = [f for f in all_list if f["trend"] == "EMERGING"]
 
+    # Sort rising by growth_diff descending
+    rising.sort(key=lambda x: x.get("growth_diff", 0.0), reverse=True)
+    # Sort stable by current_demand descending
+    stable.sort(key=lambda x: x.get("current_demand", 0.0), reverse=True)
+    # Sort emerging by relative growth
+    emerging.sort(key=lambda x: float(str(x.get("relative_growth", "0")).replace("%", "").replace("+", "") or 0), reverse=True)
+    # Sort declining by growth_diff ascending (most negative first)
+    declining.sort(key=lambda x: x.get("growth_diff", 0.0))
+
     return jsonify({
         "success": True,
         "data": {
-            "rising_skills": rising[:5],
-            "stable_skills": stable[:5],
-            "declining_skills": declining[:5],
-            "emerging_skills": emerging[:5]
+            "category": category or "All Categories",
+            "rising_skills": rising[:limit],
+            "stable_skills": stable[:limit],
+            "declining_skills": declining[:limit],
+            "emerging_skills": emerging[:limit]
         }
     }), 200
 
 @forecasting_bp.route('/skill/<skill_name>', methods=['GET', 'OPTIONS'])
 def get_skill_forecast(skill_name):
-    """Get detailed historical time series and forecast for a specific skill."""
+    """
+    Get detailed historical time series (2023-2026) and 36-month forecast for a specific skill.
+    Supports ?horizon=6|12|24|36 and ?model=auto|naive|moving_average|linear_regression|exponential_smoothing|all.
+    """
     if request.method == 'OPTIONS':
         return ('', 204)
-    forecasts = _generate_all_forecasts()
-    sk_clean = skill_name.lower().strip()
 
+    requested_horizon = int(request.args.get('horizon', 36))
+    if requested_horizon not in (3, 6, 12, 24, 36):
+        requested_horizon = 36
+
+    requested_model = request.args.get('model', 'auto').lower().strip()
+
+    forecasts = _generate_all_forecasts()
+    sk_clean = PreprocessingService.normalize_skill(skill_name)
+
+    target_forecast = None
     if sk_clean in forecasts:
+        target_forecast = forecasts[sk_clean]
+    else:
+        # Match whole words only for multi-word or distinct skills (avoiding 1-letter match like 'c')
+        for k, f in forecasts.items():
+            if len(k) >= 3 and (k == sk_clean or f" {k} " in f" {sk_clean} " or f" {sk_clean} " in f" {k} "):
+                target_forecast = f
+                break
+
+    if not target_forecast:
+        # Graceful data-driven response for unobserved skills with honest insufficiency label
+        last_p = SkillFrequencyEngine.MAX_HISTORICAL_PERIOD
+        future_p = PreprocessingService.generate_forecast_periods(last_p, horizon=requested_horizon)
+        classification = SkillTaxonomy.get_skill_classification(skill_name)
         return jsonify({
             "success": True,
             "data": {
-                "forecast": forecasts[sk_clean]
+                "forecast": {
+                    "skill": skill_name.title(),
+                    "skill_key": skill_name.lower(),
+                    "category": classification["primary"],
+                    "sub_categories": classification.get("sub", []),
+                    "horizon": f"{requested_horizon}M",
+                    "current_demand": 0.0,
+                    "predicted_demand": 0.0,
+                    "lower_bound": 0.0,
+                    "upper_bound": 0.0,
+                    "confidence_label": "Insufficient historical observations in dataset",
+                    "trend": "STABLE",
+                    "trend_label": "⚪ Insufficient Data",
+                    "growth_rate": "0.0%",
+                    "relative_growth": "0.0%",
+                    "model_name": "Naive Baseline",
+                    "mae": 0.0,
+                    "rmse": 0.0,
+                    "mape": 0.0,
+                    "reliability": "INSUFFICIENT_HISTORICAL_DATA",
+                    "periods": SkillFrequencyEngine.get_continuous_timeline()[-12:],
+                    "historical_rates": [0.0] * 12,
+                    "forecast_periods": future_p,
+                    "forecast_rates": [0.0] * requested_horizon,
+                    "forecast_lower_bounds": [0.0] * requested_horizon,
+                    "forecast_upper_bounds": [0.0] * requested_horizon,
+                    "model_comparisons": [],
+                    "all_model_predictions": {},
+                    "has_sufficient_data": False,
+                    "notice": f"The skill '{skill_name}' has insufficient historical records in the active vacancy database to produce a high-confidence forecast."
+                }
             }
         }), 200
 
-    # Default fallback response for unknown skills
+    # Slice forecast arrays to requested horizon
+    fc_copy = dict(target_forecast)
+    fc_copy["horizon"] = f"{requested_horizon}M"
+    fc_copy["forecast_periods"] = target_forecast["forecast_periods"][:requested_horizon]
+    fc_copy["forecast_rates"] = target_forecast["forecast_rates"][:requested_horizon]
+    fc_copy["forecast_lower_bounds"] = target_forecast["forecast_lower_bounds"][:requested_horizon]
+    fc_copy["forecast_upper_bounds"] = target_forecast["forecast_upper_bounds"][:requested_horizon]
+    fc_copy["predicted_demand"] = fc_copy["forecast_rates"][-1] if fc_copy["forecast_rates"] else fc_copy["current_demand"]
+
+    # Slice all model predictions
+    sliced_models = {}
+    for m_name, preds in target_forecast.get("all_model_predictions", {}).items():
+        sliced_models[m_name] = preds[:requested_horizon]
+    fc_copy["all_model_predictions"] = sliced_models
+
+    # If a specific algorithm was requested
+    model_name_map = {
+        "naive": "Naive Baseline",
+        "moving_average": "Moving Average",
+        "linear_regression": "Linear Regression",
+        "exponential_smoothing": "Exponential Smoothing"
+    }
+    if requested_model in model_name_map:
+        specific_name = model_name_map[requested_model]
+        if specific_name in sliced_models:
+            fc_copy["forecast_rates"] = sliced_models[specific_name]
+            fc_copy["model_name"] = specific_name
+            fc_copy["predicted_demand"] = fc_copy["forecast_rates"][-1]
+
     return jsonify({
         "success": True,
         "data": {
-            "forecast": {
-                "skill": skill_name.title(),
-                "horizon": "6M",
-                "current_demand": 45.0,
-                "predicted_demand": 52.5,
-                "lower_bound": 49.0,
-                "upper_bound": 56.0,
-                "confidence_label": "[49.0% – 56.0%]",
-                "trend": "RISING",
-                "trend_label": "🔥 Rising Demand",
-                "growth_rate": "+7.5%",
-                "model_name": "Exponential Smoothing",
-                "mae": 1.8,
-                "rmse": 2.2,
-                "reliability": "HIGH",
-                "periods": ["2025-10", "2025-11", "2025-12", "2026-01", "2026-02"],
-                "historical_rates": [38.0, 40.0, 42.0, 43.5, 45.0],
-                "forecast_periods": ["2026-03", "2026-04", "2026-05"],
-                "forecast_rates": [47.5, 50.0, 52.5]
-            }
+            "forecast": fc_copy
+        }
+    }), 200
+
+@forecasting_bp.route('/compare', methods=['GET', 'OPTIONS'])
+def compare_skills():
+    """
+    Compare multiple skills side-by-side.
+    Query: ?skills=python,java,sql,react&horizon=36
+    """
+    if request.method == 'OPTIONS':
+        return ('', 204)
+
+    raw_skills = request.args.get('skills', 'python,sql,react,aws')
+    skill_names = [s.strip() for s in raw_skills.split(',') if s.strip()]
+    horizon = int(request.args.get('horizon', 36))
+    if horizon not in (6, 12, 24, 36):
+        horizon = 36
+
+    forecasts = _generate_all_forecasts()
+    comparison_results = []
+
+    for sk in skill_names:
+        norm = PreprocessingService.normalize_skill(sk)
+        target = forecasts.get(norm)
+        if target:
+            comparison_results.append({
+                "skill": target.get("skill_display", sk.title()),
+                "category": target.get("category", "General Technical"),
+                "current_demand": target.get("current_demand", 0.0),
+                "predicted_demand": target.get("forecast_rates", [])[horizon - 1] if len(target.get("forecast_rates", [])) >= horizon else target.get("predicted_demand", 0.0),
+                "growth_rate": target.get("growth_rate", "+0.0%"),
+                "trend": target.get("trend", "STABLE"),
+                "trend_label": target.get("trend_label", "Stable"),
+                "model_name": target.get("model_name", "Exponential Smoothing"),
+                "mae": target.get("mae", 0.0),
+                "reliability": target.get("reliability", "HIGH"),
+                "forecast_rates": target.get("forecast_rates", [])[:horizon]
+            })
+
+    periods = target.get("forecast_periods", [])[:horizon] if target else []
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "horizon": f"{horizon}M",
+            "forecast_periods": periods,
+            "skills": comparison_results
         }
     }), 200
 
