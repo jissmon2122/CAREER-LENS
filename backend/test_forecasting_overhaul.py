@@ -206,8 +206,9 @@ class TestForecastingOverhaul(unittest.TestCase):
         self.assertEqual(len(fc["model_comparisons"]), 4)
 
     def test_api_skill_insufficient_data_endpoint(self):
-        """Test GET /api/forecasting/skill/<name> with unobserved skill."""
-        res = self.client.get('/api/forecasting/skill/nonexistent_quantum_skill_xyz?horizon=36')
+        """Test GET /api/forecasting/skill/<name> with unobserved valid technical skill vs invalid term."""
+        # Unobserved but valid technical skill from registry returns 200 with honest insufficient data notice
+        res = self.client.get('/api/forecasting/skill/Haskell?horizon=36')
         self.assertEqual(res.status_code, 200)
         json_data = res.get_json()
         self.assertTrue(json_data["success"])
@@ -215,6 +216,13 @@ class TestForecastingOverhaul(unittest.TestCase):
         self.assertEqual(fc["reliability"], "INSUFFICIENT_HISTORICAL_DATA")
         self.assertFalse(fc["has_sufficient_data"])
         self.assertIn("insufficient", fc["notice"].lower())
+
+        # Unrecognized random term is strictly rejected with HTTP 400
+        res_invalid = self.client.get('/api/forecasting/skill/nonexistent_quantum_skill_xyz?horizon=36')
+        self.assertEqual(res_invalid.status_code, 400)
+        invalid_data = res_invalid.get_json()
+        self.assertFalse(invalid_data["success"])
+        self.assertEqual(invalid_data["error"], "INVALID_SKILL")
 
     def test_api_compare_endpoint(self):
         """Test GET /api/forecasting/compare?skills=python,sql,react,aws&horizon=36."""

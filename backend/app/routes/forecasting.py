@@ -7,6 +7,7 @@ from app.services.forecasting.trend_analysis import TrendAnalysisEngine
 from app.services.forecasting.recommendations import ForecastingRecommendationEngine
 from app.services.forecasting.preprocessing import PreprocessingService
 from app.services.forecasting.skill_taxonomy import SkillTaxonomy
+from app.services.forecasting.skill_registry import SkillRegistry
 from app.services.skill_gap import SkillGapEngine
 from app.models.resume import ResumeModel
 from app.models.resume_analysis import ResumeAnalysisModel
@@ -233,10 +234,26 @@ def get_top_skills():
 def get_skill_forecast(skill_name):
     """
     Get detailed historical time series (2023-2026) and 36-month forecast for a specific skill.
+    Strictly validates skill against SkillRegistry before accessing historical data or executing models.
     Supports ?horizon=6|12|24|36 and ?model=auto|naive|moving_average|linear_regression|exponential_smoothing|all.
     """
     if request.method == 'OPTIONS':
         return ('', 204)
+
+    # 1. STRICT SKILL VALIDATION AGAINST TRUSTED REGISTRY
+    validation = SkillRegistry.validate_skill(skill_name)
+    if not validation["is_valid"]:
+        return jsonify({
+            "success": False,
+            "error": "INVALID_SKILL",
+            "message": validation.get("message") or f"The entered term '{skill_name}' is not a recognized technical skill.",
+            "suggestions": validation.get("suggestions", ["Python", "Java", "JavaScript"])
+        }), 400
+
+    canonical_key = validation["canonical_key"]
+    canonical_display = validation["display_name"]
+    category = validation["category"]
+    sub_categories = validation["sub_categories"]
 
     requested_horizon = int(request.args.get('horizon', 36))
     if requested_horizon not in (3, 6, 12, 24, 36):
@@ -245,31 +262,29 @@ def get_skill_forecast(skill_name):
     requested_model = request.args.get('model', 'auto').lower().strip()
 
     forecasts = _generate_all_forecasts()
-    sk_clean = PreprocessingService.normalize_skill(skill_name)
 
     target_forecast = None
-    if sk_clean in forecasts:
-        target_forecast = forecasts[sk_clean]
+    if canonical_key in forecasts:
+        target_forecast = forecasts[canonical_key]
     else:
-        # Match whole words only for multi-word or distinct skills (avoiding 1-letter match like 'c')
+        # Check direct lowercase key or exact title match
         for k, f in forecasts.items():
-            if len(k) >= 3 and (k == sk_clean or f" {k} " in f" {sk_clean} " or f" {sk_clean} " in f" {k} "):
+            if k == canonical_key or k.lower() == canonical_key.lower():
                 target_forecast = f
                 break
 
     if not target_forecast:
-        # Graceful data-driven response for unobserved skills with honest insufficiency label
+        # Valid technical skill from trusted registry that is unobserved in this specific vacancy dataset
         last_p = SkillFrequencyEngine.MAX_HISTORICAL_PERIOD
         future_p = PreprocessingService.generate_forecast_periods(last_p, horizon=requested_horizon)
-        classification = SkillTaxonomy.get_skill_classification(skill_name)
         return jsonify({
             "success": True,
             "data": {
                 "forecast": {
-                    "skill": skill_name.title(),
-                    "skill_key": skill_name.lower(),
-                    "category": classification["primary"],
-                    "sub_categories": classification.get("sub", []),
+                    "skill": canonical_display,
+                    "skill_key": canonical_key,
+                    "category": category,
+                    "sub_categories": sub_categories,
                     "horizon": f"{requested_horizon}M",
                     "current_demand": 0.0,
                     "predicted_demand": 0.0,
@@ -294,13 +309,17 @@ def get_skill_forecast(skill_name):
                     "model_comparisons": [],
                     "all_model_predictions": {},
                     "has_sufficient_data": False,
-                    "notice": f"The skill '{skill_name}' has insufficient historical records in the active vacancy database to produce a high-confidence forecast."
+                    "notice": f"The technical skill '{canonical_display}' is recognized, but has insufficient historical records in the active vacancy database to produce a high-confidence forecast."
                 }
             }
         }), 200
 
     # Slice forecast arrays to requested horizon
     fc_copy = dict(target_forecast)
+    # Ensure display name adheres to canonical registry display name
+    fc_copy["skill"] = canonical_display
+    fc_copy["category"] = category
+    fc_copy["sub_categories"] = sub_categories
     fc_copy["horizon"] = f"{requested_horizon}M"
     fc_copy["forecast_periods"] = target_forecast["forecast_periods"][:requested_horizon]
     fc_copy["forecast_rates"] = target_forecast["forecast_rates"][:requested_horizon]
@@ -345,21 +364,47 @@ def compare_skills():
         return ('', 204)
 
     raw_skills = request.args.get('skills', 'python,sql,react,aws')
-    skill_names = [s.strip() for s in raw_skills.split(',') if s.strip()]
+    raw_skill_list = [s.strip() for s in raw_skills.split(',') if s.strip()]
     horizon = int(request.args.get('horizon', 36))
     if horizon not in (6, 12, 24, 36):
         horizon = 36
 
+    # Validate each skill against SkillRegistry
+    valid_skills_info = []
+    invalid_skills = []
+    accumulated_suggestions = []
+
+    for s in raw_skill_list:
+        v = SkillRegistry.validate_skill(s)
+        if v["is_valid"]:
+            valid_skills_info.append(v)
+        else:
+            invalid_skills.append(s)
+            accumulated_suggestions.extend(v.get("suggestions", []))
+
+    if not valid_skills_info:
+        # None of the entered skills are recognized
+        return jsonify({
+            "success": False,
+            "error": "INVALID_SKILL",
+            "message": f"None of the entered terms ({', '.join(invalid_skills)}) are recognized technical skills.",
+            "suggestions": list(dict.fromkeys(accumulated_suggestions))[:3] or ["Python", "Java", "JavaScript"]
+        }), 400
+
     forecasts = _generate_all_forecasts()
     comparison_results = []
+    periods = []
 
-    for sk in skill_names:
-        norm = PreprocessingService.normalize_skill(sk)
-        target = forecasts.get(norm)
+    for v in valid_skills_info:
+        canonical_key = v["canonical_key"]
+        canonical_display = v["display_name"]
+        target = forecasts.get(canonical_key)
         if target:
+            if not periods:
+                periods = target.get("forecast_periods", [])[:horizon]
             comparison_results.append({
-                "skill": target.get("skill_display", sk.title()),
-                "category": target.get("category", "General Technical"),
+                "skill": canonical_display,
+                "category": v.get("category", target.get("category", "General Technical")),
                 "current_demand": target.get("current_demand", 0.0),
                 "predicted_demand": target.get("forecast_rates", [])[horizon - 1] if len(target.get("forecast_rates", [])) >= horizon else target.get("predicted_demand", 0.0),
                 "growth_rate": target.get("growth_rate", "+0.0%"),
@@ -371,15 +416,17 @@ def compare_skills():
                 "forecast_rates": target.get("forecast_rates", [])[:horizon]
             })
 
-    periods = target.get("forecast_periods", [])[:horizon] if target else []
+    response_data = {
+        "horizon": f"{horizon}M",
+        "forecast_periods": periods,
+        "skills": comparison_results
+    }
+    if invalid_skills:
+        response_data["ignored_invalid_skills"] = invalid_skills
 
     return jsonify({
         "success": True,
-        "data": {
-            "horizon": f"{horizon}M",
-            "forecast_periods": periods,
-            "skills": comparison_results
-        }
+        "data": response_data
     }), 200
 
 @forecasting_bp.route('/recommendations', methods=['GET', 'OPTIONS'])

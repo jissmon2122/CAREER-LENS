@@ -39,6 +39,12 @@ const SkillDemandPage = () => {
   const [compareSkillsInput, setCompareSkillsInput] = useState('Python, SQL, React, AWS');
   const [compareData, setCompareData] = useState(forecastMemoryCache.compareResults || null);
   const [comparing, setComparing] = useState(false);
+  const [compareError, setCompareError] = useState('');
+  const [compareSuggestions, setCompareSuggestions] = useState([]);
+
+  // Strict skill validation state
+  const [validationError, setValidationError] = useState('');
+  const [skillSuggestions, setSkillSuggestions] = useState([]);
 
   const [loading, setLoading] = useState(!isCacheValid);
   const [refreshing, setRefreshing] = useState(false);
@@ -168,20 +174,37 @@ const SkillDemandPage = () => {
   // Search Single Skill
   const handleSearchSkill = async (e, directSkill = null) => {
     if (e) e.preventDefault();
-    const query = directSkill || searchSkill.trim();
+    const query = (directSkill || searchSkill).trim();
     if (!query) return;
 
     setSearching(true);
+    setValidationError('');
+    setSkillSuggestions([]);
+
     try {
       const res = await forecastingAPI.getSkillForecast(query, { horizon, model: selectedAlgorithm });
       if (res?.success && res.data?.forecast) {
         setSkillForecast(res.data.forecast);
         setSearchSkill(res.data.forecast.skill);
         forecastMemoryCache.lastSearchedSkill = res.data.forecast.skill;
+        forecastMemoryCache.skillForecasts[res.data.forecast.skill.toLowerCase()] = res.data.forecast;
+        setValidationError('');
+        setSkillSuggestions([]);
       }
     } catch (err) {
       console.error("Skill Search Error:", err);
-      alert("Unable to fetch forecast for requested skill.");
+      const apiErr = err.response?.data;
+      if (apiErr?.error === 'INVALID_SKILL' || err.response?.status === 400) {
+        // STRICT INVALID SKILL:
+        // Do not display forecast chart, demand percentages, or trends
+        setSkillForecast(null);
+        setValidationError(apiErr?.message || `The entered term '${query}' is not a recognized technical skill.`);
+        setSkillSuggestions(apiErr?.suggestions || ['Python', 'Java', 'JavaScript']);
+      } else {
+        setSkillForecast(null);
+        setValidationError(`Unable to load forecast for '${query}'. Please select a recognized technical skill.`);
+        setSkillSuggestions(['Python', 'Java', 'SQL', 'React', 'AWS', 'Docker']);
+      }
     } finally {
       setSearching(false);
     }
@@ -192,6 +215,8 @@ const SkillDemandPage = () => {
     e.preventDefault();
     if (!compareSkillsInput.trim()) return;
     setComparing(true);
+    setCompareError('');
+    setCompareSuggestions([]);
     try {
       const res = await forecastingAPI.compareSkills(compareSkillsInput, horizon);
       if (res?.success && res.data?.skills) {
@@ -199,6 +224,13 @@ const SkillDemandPage = () => {
       }
     } catch (err) {
       console.error("Comparison Error:", err);
+      const apiErr = err.response?.data;
+      if (apiErr?.error === 'INVALID_SKILL' || err.response?.status === 400) {
+        setCompareError(apiErr?.message || "Invalid technical skills entered in comparison list.");
+        setCompareSuggestions(apiErr?.suggestions || ['Python', 'Java', 'JavaScript']);
+      } else {
+        setCompareError("Unable to compare skills. Please ensure valid skills are entered.");
+      }
     } finally {
       setComparing(false);
     }
@@ -470,18 +502,31 @@ const SkillDemandPage = () => {
           {/* Chart Header & Skill Search */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <h3 style={{ fontSize: '1.35rem', fontWeight: 800 }}>
-                  📈 {skillForecast?.skill || 'Python'}
-                </h3>
-                <span className="badge badge-purple">{skillForecast?.category || 'Programming'}</span>
-                <span className={skillForecast?.trend === 'RISING' ? 'badge badge-pink' : skillForecast?.trend === 'EMERGING' ? 'badge badge-warning' : 'badge badge-success'}>
-                  {skillForecast?.trend_label || 'Stable'}
-                </span>
-              </div>
-              <div style={{ fontSize: '0.82rem', color: 'var(--text-subtle)', marginTop: '0.2rem' }}>
-                Historical observations: <strong style={{ color: '#fff' }}>2023-01 to 2026-11 (47 mos)</strong> | Forecast horizon: <strong style={{ color: 'var(--accent-pink)' }}>Next {horizon} Months (to {skillForecast?.forecast_periods?.[skillForecast?.forecast_periods?.length - 1] || '2029-11'})</strong>
-              </div>
+              {validationError ? (
+                <div>
+                  <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#f87171', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>⚠️</span> Unrecognized Skill
+                  </h3>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-subtle)', marginTop: '0.2rem' }}>
+                    Skill Demand Forecasting is strictly restricted to verified industry technical skills.
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <h3 style={{ fontSize: '1.35rem', fontWeight: 800 }}>
+                      📈 {skillForecast?.skill || 'Python'}
+                    </h3>
+                    <span className="badge badge-purple">{skillForecast?.category || 'Programming'}</span>
+                    <span className={skillForecast?.trend === 'RISING' ? 'badge badge-pink' : skillForecast?.trend === 'EMERGING' ? 'badge badge-warning' : 'badge badge-success'}>
+                      {skillForecast?.trend_label || 'Stable'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-subtle)', marginTop: '0.2rem' }}>
+                    Historical observations: <strong style={{ color: '#fff' }}>2023-01 to 2026-11 (47 mos)</strong> | Forecast horizon: <strong style={{ color: 'var(--accent-pink)' }}>Next {horizon} Months (to {skillForecast?.forecast_periods?.[skillForecast?.forecast_periods?.length - 1] || '2029-11'})</strong>
+                  </div>
+                </div>
+              )}
             </div>
 
             <form onSubmit={handleSearchSkill} style={{ display: 'flex', gap: '0.4rem' }}>
@@ -499,322 +544,416 @@ const SkillDemandPage = () => {
             </form>
           </div>
 
-          {/* Insufficient Data Warning Banner if applicable */}
-          {!skillForecast?.has_sufficient_data && (
-            <div style={{ background: 'rgba(234, 179, 8, 0.12)', border: '1px solid var(--accent-warning)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem', marginBottom: '1.25rem', fontSize: '0.85rem', color: '#fef08a' }}>
-              ⚠️ <strong>Limited Historical Observations:</strong> The skill &lsquo;{skillForecast?.skill}&rsquo; has limited historical vacancy postings in the dataset. The time series is shown with conservative baseline bounds.
-            </div>
-          )}
+          {/* If Validation Error, display strict Invalid Skill Alert & Suggestions; hide charts, demand percentages & trends */}
+          {validationError ? (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '2.5rem 1.5rem',
+              textAlign: 'center',
+              marginTop: '1rem',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>❌</div>
+              <h4 style={{ color: '#f87171', fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.5rem' }}>
+                Unrecognized Technical Skill
+              </h4>
+              <p style={{ color: '#fca5a5', fontSize: '0.92rem', maxWidth: '520px', margin: '0 auto 1.5rem auto', lineHeight: 1.5 }}>
+                {validationError}
+              </p>
 
-          {/* Metric KPI Gauges */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }}>
-            <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>CURRENT DEMAND RATE</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff' }}>{skillForecast?.current_demand}%</div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>Market share as of Nov 2026</div>
-            </div>
-
-            <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>{horizon}M PROJECTED DEMAND</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-green)' }}>{skillForecast?.predicted_demand}%</div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--accent-green)', fontWeight: 700 }}>{skillForecast?.growth_rate} absolute growth</div>
-            </div>
-
-            <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>RELATIVE GROWTH</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-purple)' }}>{skillForecast?.relative_growth}</div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>Trend momentum rate</div>
-            </div>
-
-            <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>95% CONFIDENCE INTERVAL</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-pink)', marginTop: '0.2rem' }}>
-                [{skillForecast?.lower_bound}% – {skillForecast?.upper_bound}%]
-              </div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>±{skillForecast?.mae}% empirical error</div>
-            </div>
-          </div>
-
-          {/* Interactive Time-Series SVG Chart */}
-          <div style={{ background: 'rgba(15, 23, 42, 0.65)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', fontSize: '0.82rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span style={{ width: '12px', height: '3px', background: '#38bdf8', display: 'inline-block' }}></span>
-                  <span style={{ color: '#fff' }}>Historical Observations (2023–2026)</span>
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span style={{ width: '12px', height: '3px', background: '#f43f5e', borderTop: '2px dashed #f43f5e', display: 'inline-block' }}></span>
-                  <span style={{ color: 'var(--accent-pink)' }}>{skillForecast?.model_name || 'Selected'} Forecast (Next {horizon}M)</span>
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span style={{ width: '12px', height: '8px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.4)', display: 'inline-block' }}></span>
-                  <span style={{ color: 'var(--text-subtle)' }}>Confidence Interval Band</span>
-                </span>
-              </div>
-
-              {hoveredPoint && (
-                <div style={{ background: 'var(--bg-input)', padding: '0.25rem 0.6rem', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.78rem' }}>
-                  <strong>{hoveredPoint.period}</strong>: <span style={{ color: hoveredPoint.isForecast ? 'var(--accent-pink)' : '#38bdf8' }}>{hoveredPoint.val}%</span>
-                  {hoveredPoint.isForecast && (
-                    <span style={{ color: 'var(--text-subtle)', marginLeft: '0.35rem' }}>
-                      (CI: [{hoveredPoint.lower}% – {hoveredPoint.upper}%])
-                    </span>
-                  )}
+              {skillSuggestions && skillSuggestions.length > 0 && (
+                <div style={{ marginTop: '1rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-subtle)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.75rem' }}>
+                    Suggested Technical Skills from Trusted Registry:
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                    {skillSuggestions.map((sug) => (
+                      <button
+                        key={sug}
+                        onClick={() => handleSearchSkill(null, sug)}
+                        className="btn btn-secondary"
+                        style={{
+                          fontSize: '0.82rem',
+                          padding: '0.4rem 0.9rem',
+                          borderRadius: '20px',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <span>⚡</span>
+                        <strong>{sug}</strong>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
+          ) : (
+            <>
+              {/* Insufficient Data Warning Banner if applicable */}
+              {!skillForecast?.has_sufficient_data && (
+                <div style={{ background: 'rgba(234, 179, 8, 0.12)', border: '1px solid var(--accent-warning)', borderRadius: 'var(--radius-md)', padding: '0.75rem 1rem', marginBottom: '1.25rem', fontSize: '0.85rem', color: '#fef08a' }}>
+                  ⚠️ <strong>Limited Historical Observations:</strong> The technical skill &lsquo;{skillForecast?.skill}&rsquo; is recognized, but has limited vacancy postings in this dataset. Forecasts are shown with conservative bounds.
+                </div>
+              )}
 
-            {chartSeries ? (
-              <svg
-                viewBox={`0 0 ${chartDimensions.width} ${chartDimensions.height}`}
-                style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
-              >
-                <defs>
-                  <linearGradient id="histGrad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#0284c7" />
-                    <stop offset="100%" stopColor="#38bdf8" />
-                  </linearGradient>
-                </defs>
+              {/* Metric KPI Gauges */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>CURRENT DEMAND RATE</div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#fff' }}>{skillForecast?.current_demand}%</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>Market share as of Nov 2026</div>
+                </div>
 
-                {/* Horizontal Grid Lines */}
-                {[0, 0.25, 0.5, 0.75, 1.0].map((frac, idx) => {
-                  const yVal = frac * chartSeries.yMax;
-                  const yPos = chartSeries.getY(yVal);
-                  return (
-                    <g key={idx}>
-                      <line
-                        x1={chartDimensions.padL}
-                        y1={yPos}
-                        x2={chartDimensions.width - chartDimensions.padR}
-                        y2={yPos}
-                        stroke="rgba(255, 255, 255, 0.08)"
-                        strokeDasharray="3 3"
-                      />
-                      <text
-                        x={chartDimensions.padL - 8}
-                        y={yPos + 4}
-                        fill="var(--text-subtle)"
-                        fontSize="10"
-                        textAnchor="end"
-                      >
-                        {yVal.toFixed(1)}%
-                      </text>
-                    </g>
-                  );
-                })}
+                <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>{horizon}M PROJECTED DEMAND</div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-green)' }}>{skillForecast?.predicted_demand}%</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--accent-green)', fontWeight: 700 }}>{skillForecast?.growth_rate} absolute growth</div>
+                </div>
 
-                {/* Vertical Divider separating History from Future */}
-                <line
-                  x1={chartSeries.splitX}
-                  y1={chartDimensions.padT}
-                  x2={chartSeries.splitX}
-                  y2={chartDimensions.height - chartDimensions.padB}
-                  stroke="#a855f7"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 4"
-                />
-                <text
-                  x={chartSeries.splitX}
-                  y={chartDimensions.padT - 8}
-                  fill="#c084fc"
-                  fontSize="11"
-                  fontWeight="700"
-                  textAnchor="middle"
-                >
-                  ◀ Actual Historical | Future Projected ▶
-                </text>
+                <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>RELATIVE GROWTH</div>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--accent-purple)' }}>{skillForecast?.relative_growth}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>Trend momentum rate</div>
+                </div>
 
-                {/* Shaded Confidence Interval Band */}
-                {chartSeries.ciAreaPath && (
-                  <path
-                    d={chartSeries.ciAreaPath}
-                    fill="rgba(244, 63, 94, 0.12)"
-                    stroke="none"
-                  />
-                )}
+                <div style={{ background: 'var(--bg-input)', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', fontWeight: 700 }}>95% CONFIDENCE INTERVAL</div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-pink)', marginTop: '0.2rem' }}>
+                    [{skillForecast?.lower_bound}% – {skillForecast?.upper_bound}%]
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>±{skillForecast?.mae}% empirical error</div>
+                </div>
+              </div>
 
-                {/* Historical Observed Curve */}
-                <path
-                  d={chartSeries.histPath}
-                  fill="none"
-                  stroke="url(#histGrad)"
-                  strokeWidth="2.5"
-                />
+              {/* Interactive Time-Series SVG Chart */}
+              <div style={{ background: 'rgba(15, 23, 42, 0.65)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ width: '12px', height: '3px', background: '#38bdf8', display: 'inline-block' }}></span>
+                      <span style={{ color: '#fff' }}>Historical Observations (2023–2026)</span>
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ width: '12px', height: '3px', background: '#f43f5e', borderTop: '2px dashed #f43f5e', display: 'inline-block' }}></span>
+                      <span style={{ color: 'var(--accent-pink)' }}>{skillForecast?.model_name || 'Selected'} Forecast (Next {horizon}M)</span>
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ width: '12px', height: '8px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.4)', display: 'inline-block' }}></span>
+                      <span style={{ color: 'var(--text-subtle)' }}>Confidence Interval Band</span>
+                    </span>
+                  </div>
 
-                {/* Forecast Projected Curve (Dashed) */}
-                <path
-                  d={chartSeries.forePath}
-                  fill="none"
-                  stroke="#f43f5e"
-                  strokeWidth="2.5"
-                  strokeDasharray="5 4"
-                />
+                  {hoveredPoint && (
+                    <div style={{ background: 'var(--bg-input)', padding: '0.25rem 0.6rem', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '0.78rem' }}>
+                      <strong>{hoveredPoint.period}</strong>: <span style={{ color: hoveredPoint.isForecast ? 'var(--accent-pink)' : '#38bdf8' }}>{hoveredPoint.val}%</span>
+                      {hoveredPoint.isForecast && (
+                        <span style={{ color: 'var(--text-subtle)', marginLeft: '0.35rem' }}>
+                          (CI: [{hoveredPoint.lower}% – {hoveredPoint.upper}%])
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
 
-                {/* Interactive Points on Historical Line */}
-                {chartSeries.histPoints.filter((_, idx) => idx % 3 === 0 || idx === chartSeries.histPoints.length - 1).map((pt, idx) => (
-                  <circle
-                    key={`hp-${idx}`}
-                    cx={pt.x}
-                    cy={pt.y}
-                    r="3.5"
-                    fill="#38bdf8"
-                    stroke="#0f172a"
-                    strokeWidth="1.5"
-                    onMouseEnter={() => setHoveredPoint(pt)}
-                    onMouseLeave={() => setHoveredPoint(null)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                ))}
+                {chartSeries ? (
+                  <svg
+                    viewBox={`0 0 ${chartDimensions.width} ${chartDimensions.height}`}
+                    style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
+                  >
+                    <defs>
+                      <linearGradient id="histGrad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#0284c7" />
+                        <stop offset="100%" stopColor="#38bdf8" />
+                      </linearGradient>
+                    </defs>
 
-                {/* Interactive Points on Forecast Line */}
-                {chartSeries.forePoints.map((pt, idx) => (
-                  <circle
-                    key={`fp-${idx}`}
-                    cx={pt.x}
-                    cy={pt.y}
-                    r="3.5"
-                    fill="#f43f5e"
-                    stroke="#0f172a"
-                    strokeWidth="1.5"
-                    onMouseEnter={() => setHoveredPoint(pt)}
-                    onMouseLeave={() => setHoveredPoint(null)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                ))}
+                    {/* Horizontal Grid Lines */}
+                    {[0, 0.25, 0.5, 0.75, 1.0].map((frac, idx) => {
+                      const yVal = frac * chartSeries.yMax;
+                      const yPos = chartSeries.getY(yVal);
+                      return (
+                        <g key={idx}>
+                          <line
+                            x1={chartDimensions.padL}
+                            y1={yPos}
+                            x2={chartDimensions.width - chartDimensions.padR}
+                            y2={yPos}
+                            stroke="rgba(255, 255, 255, 0.08)"
+                            strokeDasharray="3 3"
+                          />
+                          <text
+                            x={chartDimensions.padL - 8}
+                            y={yPos + 4}
+                            fill="var(--text-subtle)"
+                            fontSize="10"
+                            textAnchor="end"
+                          >
+                            {yVal.toFixed(1)}%
+                          </text>
+                        </g>
+                      );
+                    })}
 
-                {/* X-Axis Date Labels (Every 6 months) */}
-                {chartSeries.allLabels.map((lbl, idx) => {
-                  if (idx % 6 !== 0 && idx !== chartSeries.nHist - 1 && idx !== chartSeries.nTotal - 1) return null;
-                  const x = chartSeries.getX(idx);
-                  const isFuture = idx >= chartSeries.nHist;
-                  return (
+                    {/* Vertical Divider separating History from Future */}
+                    <line
+                      x1={chartSeries.splitX}
+                      y1={chartDimensions.padT}
+                      x2={chartSeries.splitX}
+                      y2={chartDimensions.height - chartDimensions.padB}
+                      stroke="#a855f7"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 4"
+                    />
                     <text
-                      key={`xl-${idx}`}
-                      x={x}
-                      y={chartDimensions.height - chartDimensions.padB + 18}
-                      fill={isFuture ? 'var(--accent-pink)' : 'var(--text-subtle)'}
-                      fontSize="9.5"
-                      fontWeight={idx === chartSeries.nHist - 1 || idx === chartSeries.nTotal - 1 ? '700' : '400'}
+                      x={chartSeries.splitX}
+                      y={chartDimensions.padT - 8}
+                      fill="#c084fc"
+                      fontSize="11"
+                      fontWeight="700"
                       textAnchor="middle"
                     >
-                      {lbl}
+                      ◀ Actual Historical | Future Projected ▶
                     </text>
-                  );
-                })}
-              </svg>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                No time-series data available for this skill.
+
+                    {/* Shaded Confidence Interval Band */}
+                    {chartSeries.ciAreaPath && (
+                      <path
+                        d={chartSeries.ciAreaPath}
+                        fill="rgba(244, 63, 94, 0.12)"
+                        stroke="none"
+                      />
+                    )}
+
+                    {/* Historical Observed Curve */}
+                    <path
+                      d={chartSeries.histPath}
+                      fill="none"
+                      stroke="url(#histGrad)"
+                      strokeWidth="2.5"
+                    />
+
+                    {/* Forecast Projected Curve (Dashed) */}
+                    <path
+                      d={chartSeries.forePath}
+                      fill="none"
+                      stroke="#f43f5e"
+                      strokeWidth="2.5"
+                      strokeDasharray="5 4"
+                    />
+
+                    {/* Interactive Points on Historical Line */}
+                    {chartSeries.histPoints.filter((_, idx) => idx % 3 === 0 || idx === chartSeries.histPoints.length - 1).map((pt, idx) => (
+                      <circle
+                        key={`hp-${idx}`}
+                        cx={pt.x}
+                        cy={pt.y}
+                        r="3.5"
+                        fill="#38bdf8"
+                        stroke="#0f172a"
+                        strokeWidth="1.5"
+                        onMouseEnter={() => setHoveredPoint(pt)}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    ))}
+
+                    {/* Interactive Points on Forecast Line */}
+                    {chartSeries.forePoints.map((pt, idx) => (
+                      <circle
+                        key={`fp-${idx}`}
+                        cx={pt.x}
+                        cy={pt.y}
+                        r="3.5"
+                        fill="#f43f5e"
+                        stroke="#0f172a"
+                        strokeWidth="1.5"
+                        onMouseEnter={() => setHoveredPoint(pt)}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    ))}
+
+                    {/* X-Axis Date Labels (Every 6 months) */}
+                    {chartSeries.allLabels.map((lbl, idx) => {
+                      if (idx % 6 !== 0 && idx !== chartSeries.nHist - 1 && idx !== chartSeries.nTotal - 1) return null;
+                      const x = chartSeries.getX(idx);
+                      const isFuture = idx >= chartSeries.nHist;
+                      return (
+                        <text
+                          key={`xl-${idx}`}
+                          x={x}
+                          y={chartDimensions.height - chartDimensions.padB + 18}
+                          fill={isFuture ? 'var(--accent-pink)' : 'var(--text-subtle)'}
+                          fontSize="9.5"
+                          fontWeight={idx === chartSeries.nHist - 1 || idx === chartSeries.nTotal - 1 ? '700' : '400'}
+                          textAnchor="middle"
+                        >
+                          {lbl}
+                        </text>
+                      );
+                    })}
+                  </svg>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                    No time-series data available for this skill.
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         {/* Selected Model & 4-Algorithm Evaluation Panel */}
         <div className="glass-card" style={{ gridColumn: 'span 4', padding: '1.75rem' }}>
-          <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1.25rem', color: 'var(--accent-purple)' }}>
-            🤖 Multi-Model Validation & Audit
-          </h3>
-
-          {/* Model Switcher Dropdown / Pills */}
-          <div style={{ marginBottom: '1.25rem' }}>
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
-              Select Active Algorithm:
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
-              {[
-                { id: 'auto', label: 'Auto (Best MAE)' },
-                { id: 'exponential_smoothing', label: 'Exp Smoothing' },
-                { id: 'linear_regression', label: 'Linear Trend' },
-                { id: 'moving_average', label: 'Moving Avg' },
-                { id: 'naive', label: 'Naive Baseline' }
-              ].map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => handleAlgorithmChange(m.id)}
-                  className={selectedAlgorithm === m.id ? 'btn btn-primary' : 'btn btn-secondary'}
-                  style={{ fontSize: '0.78rem', padding: '0.4rem 0.5rem', textAlign: 'center' }}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Evaluation Metrics on Active Model */}
-          <div style={{ background: 'var(--bg-input)', padding: '1rem', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontWeight: 700 }}>SELECTED ALGORITHM</div>
-              <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
-                {skillForecast?.reliability || 'HIGH'} RELIABILITY
-              </span>
-            </div>
-            <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', marginTop: '0.25rem' }}>
-              {skillForecast?.model_name || 'Exponential Smoothing'}
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-subtle)', marginTop: '0.35rem' }}>
-              {skillForecast?.reason}
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginBottom: '1.25rem' }}>
-            <div style={{ background: 'var(--bg-input)', padding: '0.75rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>MAE</div>
-              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-green)' }}>{skillForecast?.mae}</div>
-            </div>
-
-            <div style={{ background: 'var(--bg-input)', padding: '0.75rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>RMSE</div>
-              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-blue)' }}>{skillForecast?.rmse}</div>
-            </div>
-
-            <div style={{ background: 'var(--bg-input)', padding: '0.75rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>MAPE</div>
-              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-purple)' }}>
-                {skillForecast?.mape ? `${skillForecast.mape}%` : 'N/A'}
+          {validationError ? (
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1.25rem', color: 'var(--accent-purple)' }}>
+                🛡️ Trusted Skill Registry
+              </h3>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-subtle)', lineHeight: 1.5, marginBottom: '1rem' }}>
+                Career Lens validates skills against an authoritative registry to guarantee high-confidence predictions. Random words, typos, and non-technical terms are blocked to prevent distorted forecasting.
+              </p>
+              <div style={{ background: 'var(--bg-input)', padding: '1rem', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+                  Supported Technical Domains:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.82rem' }}>
+                  <div>💻 <strong>Programming:</strong> Python, Java, C++, Go, Rust...</div>
+                  <div>🧠 <strong>AI & ML:</strong> Machine Learning, PyTorch, NLP...</div>
+                  <div>📊 <strong>Data & BI:</strong> SQL, MongoDB, Power BI, Spark...</div>
+                  <div>☁️ <strong>Cloud & DevOps:</strong> AWS, Azure, Docker, K8s...</div>
+                  <div>🌐 <strong>Web:</strong> React, Node.js, Next.js, Django...</div>
+                  <div>🔒 <strong>Security:</strong> Cybersecurity, Ethical Hacking...</div>
+                </div>
+              </div>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-subtle)', marginBottom: '0.6rem' }}>
+                QUICK SELECT POPULAR SKILL:
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                {['Python', 'SQL', 'React', 'AWS', 'Docker', 'Java'].map((quickSkill) => (
+                  <button
+                    key={quickSkill}
+                    onClick={() => handleSearchSkill(null, quickSkill)}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.78rem', padding: '0.4rem 0.5rem', textAlign: 'center' }}
+                  >
+                    📈 {quickSkill}
+                  </button>
+                ))}
               </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '1.25rem', color: 'var(--accent-purple)' }}>
+                🤖 Multi-Model Validation & Audit
+              </h3>
 
-          {/* 4-Algorithm Benchmark Comparison Table */}
-          <div style={{ marginTop: '1rem' }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
-              Candidate Algorithms Accuracy (Validation Split):
+              {/* Model Switcher Dropdown / Pills */}
+              <div style={{ marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                  Select Active Algorithm:
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                  {[
+                    { id: 'auto', label: 'Auto (Best MAE)' },
+                    { id: 'exponential_smoothing', label: 'Exp Smoothing' },
+                    { id: 'linear_regression', label: 'Linear Trend' },
+                    { id: 'moving_average', label: 'Moving Avg' },
+                    { id: 'naive', label: 'Naive Baseline' }
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => handleAlgorithmChange(m.id)}
+                      className={selectedAlgorithm === m.id ? 'btn btn-primary' : 'btn btn-secondary'}
+                      style={{ fontSize: '0.78rem', padding: '0.4rem 0.5rem', textAlign: 'center' }}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Evaluation Metrics on Active Model */}
+              <div style={{ background: 'var(--bg-input)', padding: '1rem', borderRadius: 'var(--radius-md)', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-subtle)', fontWeight: 700 }}>SELECTED ALGORITHM</div>
+                  <span className="badge badge-success" style={{ fontSize: '0.7rem' }}>
+                    {skillForecast?.reliability || 'HIGH'} RELIABILITY
+                  </span>
+                </div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#fff', marginTop: '0.25rem' }}>
+                  {skillForecast?.model_name || 'Exponential Smoothing'}
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-subtle)', marginTop: '0.35rem' }}>
+                  {skillForecast?.reason}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                <div style={{ background: 'var(--bg-input)', padding: '0.75rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>MAE</div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-green)' }}>{skillForecast?.mae}</div>
+                </div>
+
+                <div style={{ background: 'var(--bg-input)', padding: '0.75rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>RMSE</div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-blue)' }}>{skillForecast?.rmse}</div>
+                </div>
+
+                <div style={{ background: 'var(--bg-input)', padding: '0.75rem', borderRadius: 'var(--radius-md)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>MAPE</div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-purple)' }}>
+                    {skillForecast?.mape ? `${skillForecast.mape}%` : 'N/A'}
+                  </div>
+                </div>
+              </div>
+
+              {/* 4-Algorithm Benchmark Comparison Table */}
+              <div style={{ marginTop: '1rem' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-subtle)', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+                  Candidate Algorithms Accuracy (Validation Split):
+                </div>
+                <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-subtle)' }}>
+                      <th style={{ textAlign: 'left', padding: '0.4rem 0' }}>Algorithm</th>
+                      <th style={{ textAlign: 'right', padding: '0.4rem 0' }}>MAE</th>
+                      <th style={{ textAlign: 'right', padding: '0.4rem 0' }}>RMSE</th>
+                      <th style={{ textAlign: 'right', padding: '0.4rem 0' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {skillForecast?.model_comparisons?.map((c, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td style={{ padding: '0.45rem 0', fontWeight: c.is_best ? '800' : '400', color: c.is_best ? 'var(--accent-green)' : '#cbd5e1' }}>
+                          {c.name}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.45rem 0', color: c.is_best ? 'var(--accent-green)' : 'inherit' }}>
+                          {c.mae}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.45rem 0' }}>
+                          {c.rmse}
+                        </td>
+                        <td style={{ textAlign: 'right', padding: '0.45rem 0' }}>
+                          {c.is_best ? (
+                            <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>Best Fit</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-subtle)', fontSize: '0.72rem' }}>Candidate</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <table style={{ width: '100%', fontSize: '0.82rem', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-subtle)' }}>
-                  <th style={{ textAlign: 'left', padding: '0.4rem 0' }}>Algorithm</th>
-                  <th style={{ textAlign: 'right', padding: '0.4rem 0' }}>MAE</th>
-                  <th style={{ textAlign: 'right', padding: '0.4rem 0' }}>RMSE</th>
-                  <th style={{ textAlign: 'right', padding: '0.4rem 0' }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {skillForecast?.model_comparisons?.map((c, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <td style={{ padding: '0.45rem 0', fontWeight: c.is_best ? '800' : '400', color: c.is_best ? 'var(--accent-green)' : '#cbd5e1' }}>
-                      {c.name}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '0.45rem 0', color: c.is_best ? 'var(--accent-green)' : 'inherit' }}>
-                      {c.mae}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '0.45rem 0' }}>
-                      {c.rmse}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '0.45rem 0' }}>
-                      {c.is_best ? (
-                        <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>Best Fit</span>
-                      ) : (
-                        <span style={{ color: 'var(--text-subtle)', fontSize: '0.72rem' }}>Candidate</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          )}
         </div>
       </div>
 
@@ -844,6 +983,42 @@ const SkillDemandPage = () => {
             </button>
           </form>
         </div>
+
+        {compareError && (
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            borderRadius: 'var(--radius-md)',
+            padding: '1.25rem 1.5rem',
+            marginBottom: '1.5rem',
+            color: '#fca5a5',
+            fontSize: '0.9rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 800, color: '#f87171', marginBottom: '0.4rem' }}>
+              <span>⚠️</span> Invalid Comparison Query
+            </div>
+            <div>{compareError}</div>
+            {compareSuggestions && compareSuggestions.length > 0 && (
+              <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-subtle)', fontWeight: 700 }}>Try valid technical skills:</span>
+                {compareSuggestions.map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      setCompareSkillsInput(prev => `${prev ? prev + ', ' : ''}${s}`);
+                      setCompareError('');
+                    }}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', borderRadius: '15px' }}
+                  >
+                    + {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {compareData?.skills && compareData.skills.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>

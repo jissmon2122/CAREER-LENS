@@ -175,6 +175,15 @@ class SkillTaxonomy:
         if not skill_name:
             return {"primary": "Other", "sub": []}
         
+        # Check central SkillRegistry first
+        try:
+            from app.services.forecasting.skill_registry import SkillRegistry
+            val = SkillRegistry.validate_skill(skill_name)
+            if val["is_valid"]:
+                return {"primary": val["category"], "sub": val["sub_categories"]}
+        except ImportError:
+            pass
+
         sk_clean = skill_name.lower().strip()
         
         if sk_clean in cls.TAXONOMY_MAP:
